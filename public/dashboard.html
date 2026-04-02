@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="card wide">
+      <h1>Agency dashboard</h1>
+      <form id="client-form" class="inline-form">
+        <input type="text" name="name" placeholder="Client name" required />
+        <input type="text" name="industry" placeholder="Industry" />
+        <button type="submit">Add client</button>
+      </form>
+      <button id="refresh-btn" type="button">Refresh clients</button>
+      <ul id="client-list"></ul>
+      <pre id="status"></pre>
+    </main>
+    <script>
+      const token = localStorage.getItem('token');
+      const status = document.getElementById('status');
+      const list = document.getElementById('client-list');
+      const form = document.getElementById('client-form');
+      const refreshBtn = document.getElementById('refresh-btn');
+
+      if (!token) {
+        window.location.href = '/login.html';
+      }
+
+      async function loadClients() {
+        const response = await fetch('/api/clients', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const body = await response.json();
+
+        if (!response.ok) {
+          status.textContent = body.error || 'Failed to load clients';
+          return;
+        }
+
+        list.innerHTML = '';
+        body.clients.forEach((client) => {
+          const item = document.createElement('li');
+          item.textContent = `${client.name}${client.industry ? ` — ${client.industry}` : ''}`;
+          list.appendChild(item);
+        });
+
+        status.textContent = `${body.clients.length} active client(s)`;
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(form).entries());
+
+        const response = await fetch('/api/clients', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const body = await response.json();
+
+        if (!response.ok) {
+          status.textContent = body.error || 'Failed to add client';
+          return;
+        }
+
+        form.reset();
+        await loadClients();
+      });
+
+      refreshBtn.addEventListener('click', loadClients);
+      loadClients();
+    </script>
+  </body>
+</html>
