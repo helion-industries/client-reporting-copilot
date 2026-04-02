@@ -12,6 +12,8 @@ const { parse } = require('csv-parse/sync');
 const { createDatabase } = require('./db');
 const { authMiddleware, signToken, optionalAuthMiddleware } = require('./auth');
 const { buildEmailDraft, buildReportHtml } = require('./reportRender');
+const { PLANS, PAID_PLANS } = require('./plans');
+const { createRequirePlan } = require('./billing');
 const {
   DEFAULT_REPORT_TEMPLATE,
   ReportEngine,
@@ -191,6 +193,98 @@ function createApp(options = {}) {
         : undefined
     )
   );
+  // Stripe webhook must use raw body — registered BEFORE express.json()
+  app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    let event;
+
+    try {
+      const sig = req.headers['stripe-signature'];
+      if (webhookSecret && webhookSecret !== 'whsec_placeholder') {
+        event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+      } else {
+        // dev/test: parse raw body directly
+        event = JSON.parse(req.body.toString());
+      }
+    } catch (err) {
+      console.error('Webhook signature verification failed:', err.message);
+      return res.status(400).json({ error: `Webhook error: ${err.message}` });
+    }
+
+    const upsertSubscription = db.prepare(`
+      INSERT INTO subscriptions (agency_id, stripe_customer_id, stripe_subscription_id, plan_id, status, current_period_end, cancel_at_period_end, updated_at)
+      VALUES (?, ?, ?, ?, 'active', ?, 0, CURRENT_TIMESTAMP)
+      ON CONFLICT(agency_id) DO UPDATE SET
+        stripe_customer_id = excluded.stripe_customer_id,
+        stripe_subscription_id = excluded.stripe_subscription_id,
+        plan_id = excluded.plan_id,
+        status = 'active',
+        current_period_end = excluded.current_period_end,
+        cancel_at_period_end = 0,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    const updateSubscriptionStatus = db.prepare(`
+      UPDATE subscriptions
+      SET status = ?, current_period_end = ?, cancel_at_period_end = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE stripe_subscription_id = ?
+    `);
+
+    const cancelSubscription = db.prepare(`
+      UPDATE subscriptions
+      SET status = 'cancelled', plan_id = 'free', updated_at = CURRENT_TIMESTAMP
+      WHERE stripe_subscription_id = ?
+    `);
+
+    const findAgencyByCustomer = db.prepare(
+      'SELECT agency_id FROM subscriptions WHERE stripe_customer_id = ?'
+    );
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object;
+          const customerId = session.customer;
+          const subscriptionId = session.subscription;
+          const planId = session.metadata?.plan_id || 'starter';
+          const agencyId = session.metadata?.agency_id;
+
+          if (agencyId) {
+            // Fetch period end from subscription
+            let periodEnd = null;
+            try {
+              const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
+              periodEnd = new Date(stripeSub.current_period_end * 1000).toISOString();
+            } catch (_) {}
+            upsertSubscription.run(agencyId, customerId, subscriptionId, planId, periodEnd);
+          }
+          break;
+        }
+
+        case 'customer.subscription.updated': {
+          const sub = event.data.object;
+          const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+          updateSubscriptionStatus.run(sub.status, periodEnd, sub.cancel_at_period_end ? 1 : 0, sub.id);
+          break;
+        }
+
+        case 'customer.subscription.deleted': {
+          const sub = event.data.object;
+          cancelSubscription.run(sub.id);
+          break;
+        }
+
+        default:
+          // ignore other events
+      }
+    } catch (err) {
+      console.error('Webhook handler error:', err);
+    }
+
+    return res.json({ received: true });
+  });
+
   app.use(express.json());
   app.use(express.static(path.resolve(__dirname, '..', 'public'), { index: false }));
 
@@ -201,6 +295,25 @@ function createApp(options = {}) {
   const insertAgency = db.prepare(
     'INSERT INTO agencies (name, email, password_hash) VALUES (?, ?, ?)'
   );
+
+  // Billing prepared statements
+  const insertFreeSubscription = db.prepare(`
+    INSERT OR IGNORE INTO subscriptions (agency_id, plan_id, status)
+    VALUES (?, 'free', 'active')
+  `);
+  const selectSubscription = db.prepare('SELECT * FROM subscriptions WHERE agency_id = ?');
+  const upsertSubscriptionBilling = db.prepare(`
+    INSERT INTO subscriptions (agency_id, stripe_customer_id, stripe_subscription_id, plan_id, status, updated_at)
+    VALUES (?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+    ON CONFLICT(agency_id) DO UPDATE SET
+      stripe_customer_id = excluded.stripe_customer_id,
+      stripe_subscription_id = excluded.stripe_subscription_id,
+      plan_id = excluded.plan_id,
+      status = 'active',
+      updated_at = CURRENT_TIMESTAMP
+  `);
+
+  const requirePlan = createRequirePlan(db);
   const updateAgency = db.prepare(
     'UPDATE agencies SET name = ?, logo_url = ?, brand_color = ? WHERE id = ?'
   );
@@ -425,11 +538,98 @@ function createApp(options = {}) {
     }
   }
 
+  // ── Billing Routes ──────────────────────────────────────────────────────────
+
+  app.get('/api/billing/plans', (_req, res) => {
+    return res.json({ plans: PAID_PLANS });
+  });
+
+  app.get('/api/billing/subscription', authMiddleware, (req, res) => {
+    const sub = selectSubscription.get(req.auth.sub) || {
+      plan_id: 'free',
+      status: 'active',
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      current_period_end: null,
+      cancel_at_period_end: 0,
+    };
+    const plan = PLANS[sub.plan_id] || PLANS.free;
+    const { total: clientCount } = db.prepare(
+      'SELECT COUNT(*) AS total FROM clients WHERE agency_id = ? AND archived_at IS NULL'
+    ).get(req.auth.sub);
+
+    return res.json({
+      subscription: {
+        ...sub,
+        plan,
+        client_count: clientCount,
+      },
+    });
+  });
+
+  app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res) => {
+    const { plan_id } = req.body || {};
+
+    const plan = PLANS[plan_id];
+    if (!plan || plan.id === 'free') {
+      return res.status(400).json({ error: 'Invalid plan_id. Must be "starter" or "pro".' });
+    }
+
+    if (!plan.stripe_price_id || plan.stripe_price_id.includes('placeholder')) {
+      return res.status(400).json({ error: 'Stripe price ID not configured for this plan. Please create the product in Stripe Dashboard first.' });
+    }
+
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const agency = selectAgencyById.get(req.auth.sub);
+
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [{ price: plan.stripe_price_id, quantity: 1 }],
+        customer_email: agency.email,
+        metadata: { agency_id: String(req.auth.sub), plan_id: plan.id },
+        success_url: `${appBaseUrl}/dashboard.html?checkout=success`,
+        cancel_url: `${appBaseUrl}/dashboard.html?checkout=cancelled`,
+      });
+
+      return res.json({ url: session.url });
+    } catch (err) {
+      console.error('Stripe checkout error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to create checkout session' });
+    }
+  });
+
+  app.post('/api/billing/create-portal-session', authMiddleware, async (req, res) => {
+    const sub = selectSubscription.get(req.auth.sub);
+    if (!sub?.stripe_customer_id) {
+      return res.status(400).json({ error: 'No active subscription found. Please subscribe first.' });
+    }
+
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: sub.stripe_customer_id,
+        return_url: `${appBaseUrl}/dashboard.html`,
+      });
+
+      return res.json({ url: session.url });
+    } catch (err) {
+      console.error('Stripe portal error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to create portal session' });
+    }
+  });
+
+  // ── End Billing Routes ───────────────────────────────────────────────────────
+
   app.get('/', optionalAuthMiddleware, (req, res) => {
     if (req.auth?.sub) {
       return res.redirect('/dashboard.html');
     }
-    return res.sendFile(path.resolve(__dirname, '..', 'public', 'index.html'));
+    const htmlPath = path.resolve(__dirname, '..', 'public', 'index.html');
+    const fs = require('fs');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(fs.readFileSync(htmlPath, 'utf8'));
   });
 
   app.post('/api/auth/register', authRateLimiter, async (req, res) => {
@@ -448,6 +648,10 @@ function createApp(options = {}) {
     const passwordHash = await bcrypt.hash(password, 10);
     const result = insertAgency.run(agencyName.trim(), normalizedEmail, passwordHash);
     const agency = selectAgencyById.get(result.lastInsertRowid);
+
+    // Auto-create free subscription
+    insertFreeSubscription.run(result.lastInsertRowid);
+
     const token = signToken(agency);
 
     return res.status(201).json({ token, agency: sanitizeAgency(agency) });
@@ -513,7 +717,7 @@ function createApp(options = {}) {
     return res.json({ agency: sanitizeAgency(updated) });
   });
 
-  app.post('/api/clients', authMiddleware, (req, res) => {
+  app.post('/api/clients', authMiddleware, requirePlan, (req, res) => {
     const { name, industry = null } = req.body || {};
 
     if (!name || !String(name).trim()) {

@@ -334,3 +334,43 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+/* Billing section */
+.billing-plan {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.billing-status {
+  font-size: 0.875rem;
+}
+
+.billing-limit {
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.billing-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.checkout-banner {
+  padding: 0.75rem 1.25rem;
+  font-weight: 600;
+  text-align: center;
+  font-size: 0.95rem;
+}
+
+.checkout-success {
+  background: #d1fae5;
+  color: #065f46;
+  border-bottom: 1px solid #6ee7b7;
+}
+
+.checkout-cancelled {
+  background: #fef3c7;
+  color: #92400e;
+  border-bottom: 1px solid #fcd34d;
+}

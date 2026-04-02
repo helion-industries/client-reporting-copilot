@@ -1,0 +1,15 @@
+[Unit]
+Description=Helion Client Reporting Copilot
+After=network.target
+
+[Service]
+Type=simple
+User=openclaw
+WorkingDirectory=/opt/openclaw/.openclaw/workspace/client-reporting-copilot
+EnvironmentFile=/opt/openclaw/.openclaw/workspace/client-reporting-copilot/.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

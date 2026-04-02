@@ -39,6 +39,13 @@
             </form>
           </section>
 
+          <section class="panel card" id="billing-section">
+            <h2>Plan &amp; Billing</h2>
+            <div id="billing-info">
+              <p class="muted">Loading billing…</p>
+            </div>
+          </section>
+
           <section class="panel card">
             <h2>Status</h2>
             <pre id="status" class="status-box"></pre>
@@ -64,10 +71,31 @@
       const logoutBtn = document.getElementById('logout-btn');
       const agencyName = document.getElementById('agency-name');
       const analyticsCard = document.getElementById('analytics-card');
+      const billingInfo = document.getElementById('billing-info');
 
       if (!token) {
         window.location.href = '/login.html';
       }
+
+      // Handle Stripe checkout redirect params
+      (function handleCheckoutParams() {
+        const params = new URLSearchParams(window.location.search);
+        const checkout = params.get('checkout');
+        if (checkout === 'success') {
+          const banner = document.createElement('div');
+          banner.className = 'checkout-banner checkout-success';
+          banner.textContent = '🎉 Subscription activated! Welcome to your new plan.';
+          document.body.prepend(banner);
+          // Clean up URL
+          history.replaceState({}, '', '/dashboard.html');
+        } else if (checkout === 'cancelled') {
+          const banner = document.createElement('div');
+          banner.className = 'checkout-banner checkout-cancelled';
+          banner.textContent = 'Checkout cancelled. You have not been charged.';
+          document.body.prepend(banner);
+          history.replaceState({}, '', '/dashboard.html');
+        }
+      })();
 
       function setStatus(message) {
         status.textContent = message;
@@ -417,12 +445,10 @@
           }
 
           const html = await response.text();
-          const previewWindow = window.open('', '_blank', 'noopener');
-          if (previewWindow) {
-            previewWindow.document.open();
-            previewWindow.document.write(html);
-            previewWindow.document.close();
-          }
+          const blob = new Blob([html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          window.open(blobUrl, '_blank');
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
           setStatus(`Opened preview for report ${reportId}`);
         }
 
@@ -562,6 +588,108 @@
         }
       });
 
+      async function renderBilling() {
+        try {
+          const result = await api('/api/billing/subscription');
+          if (!result.ok) {
+            billingInfo.innerHTML = '<p class="muted">Could not load billing info.</p>';
+            return;
+          }
+          const { subscription } = result.body;
+          const plan = subscription.plan;
+          const clientCount = subscription.client_count;
+          const limit = plan.client_limit;
+          const limitText = limit === null ? 'Unlimited clients' : `${clientCount}/${limit} clients used`;
+          const isFreePlan = plan.id === 'free';
+          const isPaidPlan = !isFreePlan && subscription.status === 'active';
+
+          let html = `
+            <div class="billing-plan">
+              <strong>${escapeHtml(plan.name)} Plan</strong>
+              <span class="muted billing-status"> · ${escapeHtml(subscription.status)}</span>
+            </div>
+            <p class="muted billing-limit">${limitText}</p>
+          `;
+
+          if (isFreePlan) {
+            html += `
+              <div class="billing-actions">
+                <button type="button" class="button-link" id="upgrade-starter-btn">Upgrade to Starter ($49/mo)</button>
+                <button type="button" class="button-link button-link-secondary" id="upgrade-pro-btn">Upgrade to Pro ($99/mo)</button>
+              </div>
+            `;
+          } else if (isPaidPlan) {
+            html += `<button type="button" class="button-secondary" id="manage-billing-btn">Manage Billing</button>`;
+            if (subscription.current_period_end) {
+              const d = new Date(subscription.current_period_end).toLocaleDateString();
+              html += `<p class="muted">Renews ${d}</p>`;
+            }
+          }
+
+          billingInfo.innerHTML = html;
+
+          // Bind billing button actions
+          const upgradeStarterBtn = document.getElementById('upgrade-starter-btn');
+          const upgradeProBtn = document.getElementById('upgrade-pro-btn');
+          const manageBillingBtn = document.getElementById('manage-billing-btn');
+
+          if (upgradeStarterBtn) {
+            upgradeStarterBtn.addEventListener('click', async () => {
+              upgradeStarterBtn.disabled = true;
+              upgradeStarterBtn.textContent = 'Redirecting…';
+              const r = await api('/api/billing/create-checkout-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plan_id: 'starter' }),
+              });
+              if (r.ok && r.body.url) {
+                window.location.href = r.body.url;
+              } else {
+                setStatus(r.body?.error || 'Failed to start checkout');
+                upgradeStarterBtn.disabled = false;
+                upgradeStarterBtn.textContent = 'Upgrade to Starter ($49/mo)';
+              }
+            });
+          }
+
+          if (upgradeProBtn) {
+            upgradeProBtn.addEventListener('click', async () => {
+              upgradeProBtn.disabled = true;
+              upgradeProBtn.textContent = 'Redirecting…';
+              const r = await api('/api/billing/create-checkout-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plan_id: 'pro' }),
+              });
+              if (r.ok && r.body.url) {
+                window.location.href = r.body.url;
+              } else {
+                setStatus(r.body?.error || 'Failed to start checkout');
+                upgradeProBtn.disabled = false;
+                upgradeProBtn.textContent = 'Upgrade to Pro ($99/mo)';
+              }
+            });
+          }
+
+          if (manageBillingBtn) {
+            manageBillingBtn.addEventListener('click', async () => {
+              manageBillingBtn.disabled = true;
+              manageBillingBtn.textContent = 'Redirecting…';
+              const r = await api('/api/billing/create-portal-session', { method: 'POST' });
+              if (r.ok && r.body.url) {
+                window.location.href = r.body.url;
+              } else {
+                setStatus(r.body?.error || 'Failed to open billing portal');
+                manageBillingBtn.disabled = false;
+                manageBillingBtn.textContent = 'Manage Billing';
+              }
+            });
+          }
+        } catch (err) {
+          billingInfo.innerHTML = '<p class="muted">Could not load billing info.</p>';
+        }
+      }
+
       refreshBtn.addEventListener('click', refreshDashboard);
       logoutBtn.addEventListener('click', () => {
         localStorage.removeItem('token');
@@ -571,6 +699,8 @@
       refreshDashboard().catch((error) => {
         setStatus(error.message || 'Failed to load dashboard');
       });
+
+      renderBilling().catch(() => {});
     </script>
   </body>
 </html>

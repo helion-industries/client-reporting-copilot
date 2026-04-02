@@ -75,6 +75,20 @@ function createDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (report_id) REFERENCES reports(id)
     );
+
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agency_id INTEGER NOT NULL UNIQUE,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      plan_id TEXT NOT NULL DEFAULT 'free',
+      status TEXT NOT NULL DEFAULT 'active',
+      current_period_end TEXT,
+      cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (agency_id) REFERENCES agencies(id)
+    );
   `);
 
   return db;
