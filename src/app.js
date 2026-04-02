@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -8,6 +9,7 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createDatabase } = require('./db');
 const { authMiddleware, signToken } = require('./auth');
+const { buildEmailDraft, buildReportHtml } = require('./reportRender');
 const {
   DEFAULT_REPORT_TEMPLATE,
   ReportEngine,
@@ -119,6 +121,8 @@ function createApp(options = {}) {
   const uploadDir = options.uploadDir || path.join(os.tmpdir(), 'client-reporting-imports');
   const upload = createUploadMiddleware(uploadDir);
   const reportEngine = options.reportEngine || new ReportEngine(options.reportEngineOptions);
+  const puppeteer = options.puppeteer || require('puppeteer');
+  const appBaseUrl = String(options.appBaseUrl || process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 
   app.use(cors());
   app.use(express.json());
@@ -217,6 +221,30 @@ function createApp(options = {}) {
      )`
   );
 
+  const insertShareLink = db.prepare(
+    `INSERT INTO share_links (report_id, token, expires_at) VALUES (?, ?, ?)`
+  );
+  const selectLatestShareLinkForReport = db.prepare(
+    `SELECT sl.*
+     FROM share_links sl
+     INNER JOIN reports r ON r.id = sl.report_id
+     INNER JOIN clients c ON c.id = r.client_id
+     WHERE sl.report_id = ? AND c.agency_id = ? AND c.archived_at IS NULL
+     ORDER BY sl.created_at DESC, sl.id DESC
+     LIMIT 1`
+  );
+  const selectShareLinkByToken = db.prepare(
+    `SELECT sl.*,
+            r.id AS report_id, r.client_id, r.import_id, r.period, r.template_config_json, r.sections_json, r.status, r.created_at AS report_created_at, r.updated_at,
+            c.name AS client_name, c.industry AS client_industry, c.archived_at,
+            a.id AS agency_id, a.name AS agency_name, a.email AS agency_email, a.logo_url, a.brand_color
+     FROM share_links sl
+     INNER JOIN reports r ON r.id = sl.report_id
+     INNER JOIN clients c ON c.id = r.client_id
+     INNER JOIN agencies a ON a.id = c.agency_id
+     WHERE sl.token = ?`
+  );
+
   function sanitizeAgency(row) {
     if (!row) return null;
     return {
@@ -271,6 +299,49 @@ function createApp(options = {}) {
       return null;
     }
     return client;
+  }
+
+  function getAuthorizedReport(clientId, reportId, agencyId) {
+    const client = requireActiveClient(clientId, agencyId);
+    if (!client) {
+      return { client: null, report: null };
+    }
+
+    const report = selectReport.get(reportId, clientId, agencyId);
+    if (!report || report.archived_at) {
+      return { client, report: null };
+    }
+
+    return { client, report };
+  }
+
+  function getShareUrl(token) {
+    return `${appBaseUrl}/api/shared/${token}`;
+  }
+
+  function isExpired(expiresAt) {
+    return Number.isNaN(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now();
+  }
+
+  function createReportHtmlPayload({ agency, client, report, shareUrl = null, isShared = false }) {
+    return buildReportHtml({
+      agency: sanitizeAgency(agency) || agency,
+      client,
+      report: serializeReport(report) || report,
+      shareUrl,
+      isShared,
+    });
+  }
+
+  async function renderReportPdf(html) {
+    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+      return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' } });
+    } finally {
+      await browser.close();
+    }
   }
 
   app.post('/api/auth/register', async (req, res) => {
@@ -600,18 +671,161 @@ function createApp(options = {}) {
   app.get('/api/clients/:id/reports/:reportId', authMiddleware, (req, res) => {
     const clientId = Number(req.params.id);
     const reportId = Number(req.params.reportId);
-    const client = requireActiveClient(clientId, req.auth.sub);
+    const { client, report } = getAuthorizedReport(clientId, reportId, req.auth.sub);
 
     if (!client) {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    const report = selectReport.get(reportId, clientId, req.auth.sub);
-    if (!report || report.archived_at) {
+    if (!report) {
       return res.status(404).json({ error: 'Report not found' });
     }
 
     return res.json({ report: serializeReport(report) });
+  });
+
+  app.get('/api/clients/:id/reports/:reportId/preview', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const { client, report } = getAuthorizedReport(clientId, reportId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const agency = selectAgencyById.get(req.auth.sub);
+    const shareLink = selectLatestShareLinkForReport.get(reportId, req.auth.sub);
+    const shareUrl = shareLink && !isExpired(shareLink.expires_at) ? getShareUrl(shareLink.token) : null;
+    const html = createReportHtmlPayload({ agency, client, report, shareUrl });
+
+    res.type('html');
+    return res.send(html);
+  });
+
+  app.get('/api/clients/:id/reports/:reportId/pdf', authMiddleware, async (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const { client, report } = getAuthorizedReport(clientId, reportId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    try {
+      const agency = selectAgencyById.get(req.auth.sub);
+      const shareLink = selectLatestShareLinkForReport.get(reportId, req.auth.sub);
+      const shareUrl = shareLink && !isExpired(shareLink.expires_at) ? getShareUrl(shareLink.token) : null;
+      const html = createReportHtmlPayload({ agency, client, report, shareUrl });
+      const pdf = await renderReportPdf(html);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=report-${reportId}.pdf`);
+      return res.send(pdf);
+    } catch (error) {
+      return res.status(500).json({ error: error.message || 'Failed to generate PDF' });
+    }
+  });
+
+  app.post('/api/clients/:id/reports/:reportId/share', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const { client, report } = getAuthorizedReport(clientId, reportId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const expiresInDays = Number(req.body?.expires_in_days || 30);
+    const safeDays = Number.isFinite(expiresInDays) && expiresInDays > 0 ? expiresInDays : 30;
+    const expiresAt = new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString();
+    const token = crypto.randomBytes(24).toString('hex');
+    insertShareLink.run(reportId, token, expiresAt);
+
+    return res.status(201).json({
+      share_link: {
+        token,
+        url: getShareUrl(token),
+        expires_at: expiresAt,
+      },
+    });
+  });
+
+  app.get('/api/shared/:token', (req, res) => {
+    const shared = selectShareLinkByToken.get(String(req.params.token || '').trim());
+
+    if (!shared || shared.archived_at || isExpired(shared.expires_at)) {
+      return res.status(404).send('Not found');
+    }
+
+    const html = buildReportHtml({
+      agency: {
+        id: shared.agency_id,
+        name: shared.agency_name,
+        email: shared.agency_email,
+        logo_url: shared.logo_url,
+        brand_color: shared.brand_color,
+      },
+      client: {
+        id: shared.client_id,
+        name: shared.client_name,
+        industry: shared.client_industry,
+      },
+      report: serializeReport(shared),
+      shareUrl: getShareUrl(shared.token),
+      isShared: true,
+    });
+
+    res.type('html');
+    return res.send(html);
+  });
+
+  app.get('/api/clients/:id/reports/:reportId/email-draft', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const { client, report } = getAuthorizedReport(clientId, reportId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    let shareLink = selectLatestShareLinkForReport.get(reportId, req.auth.sub);
+    if (!shareLink || isExpired(shareLink.expires_at)) {
+      const token = crypto.randomBytes(24).toString('hex');
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      insertShareLink.run(reportId, token, expiresAt);
+      shareLink = { token, expires_at: expiresAt };
+    }
+
+    const agency = selectAgencyById.get(req.auth.sub);
+    const draft = buildEmailDraft({
+      agency,
+      client,
+      report: serializeReport(report),
+      shareUrl: getShareUrl(shareLink.token),
+    });
+
+    return res.json({
+      email_draft: {
+        subject: draft.subject,
+        body: draft.body,
+        share_url: getShareUrl(shareLink.token),
+      },
+    });
   });
 
   app.put('/api/clients/:id/reports/:reportId', authMiddleware, (req, res) => {
