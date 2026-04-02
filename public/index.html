@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Client Reporting Copilot</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell shell-center">
+      <section class="hero-card card">
+        <div class="badge">Client Reporting Copilot</div>
+        <h1>Branded client reporting without the monthly scramble.</h1>
+        <p class="hero-copy">
+          Upload campaign data, generate polished reports, export PDFs, and share client-ready links from one lightweight workspace.
+        </p>
+        <div class="hero-actions">
+          <a class="button-link" href="/login.html">Log in</a>
+          <a class="button-link button-link-secondary" href="/register.html">Create account</a>
+        </div>
+        <p id="redirect-status" class="muted">Checking your session…</p>
+      </section>
+    </main>
+    <script>
+      const redirectStatus = document.getElementById('redirect-status');
+      const token = localStorage.getItem('token');
+
+      async function resolveSession() {
+        if (!token) {
+          window.location.replace('/login.html');
+          return;
+        }
+
+        try {
+          const response = await fetch('/api/agency', {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          if (response.ok) {
+            window.location.replace('/dashboard.html');
+            return;
+          }
+        } catch (_error) {
+          // fall through to login
+        }
+
+        localStorage.removeItem('token');
+        redirectStatus.textContent = 'Your session expired. Redirecting to login…';
+        window.location.replace('/login.html');
+      }
+
+      resolveSession();
+    </script>
+  </body>
+</html>

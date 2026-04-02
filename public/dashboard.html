@@ -3,80 +3,92 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dashboard</title>
+    <title>Dashboard · Client Reporting Copilot</title>
     <link rel="stylesheet" href="/styles.css" />
-    <style>
-      .client-card {
-        border: 1px solid #ddd;
-        border-radius: 10px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-      }
-      .client-card h3,
-      .client-card h4,
-      .client-card h5 {
-        margin: 0 0 0.5rem;
-      }
-      .import-list,
-      .report-list {
-        margin-top: 0.75rem;
-        padding-left: 1rem;
-      }
-      .import-actions,
-      .report-actions {
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-        margin-top: 0.5rem;
-      }
-      .stack {
-        display: grid;
-        gap: 0.5rem;
-        margin-top: 0.75rem;
-      }
-      textarea {
-        width: 100%;
-        min-height: 120px;
-      }
-      .report-section {
-        margin-top: 0.75rem;
-        padding: 0.75rem;
-        border: 1px solid #eee;
-        border-radius: 8px;
-      }
-    </style>
   </head>
   <body>
-    <main class="card wide">
-      <h1>Agency dashboard</h1>
-      <form id="client-form" class="inline-form">
-        <input type="text" name="name" placeholder="Client name" required />
-        <input type="text" name="industry" placeholder="Industry" />
-        <button type="submit">Add client</button>
-      </form>
-      <button id="refresh-btn" type="button">Refresh clients</button>
-      <div id="client-list"></div>
-      <pre id="status"></pre>
-    </main>
+    <div class="shell app-shell">
+      <header class="topbar card">
+        <div>
+          <p class="muted">Agency workspace</p>
+          <h1 id="agency-name">Loading agency…</h1>
+        </div>
+        <div class="toolbar-actions">
+          <button id="refresh-btn" type="button" class="button-secondary">Refresh</button>
+          <button id="logout-btn" type="button" class="button-secondary">Log out</button>
+        </div>
+      </header>
+
+      <div class="dashboard-grid">
+        <aside class="sidebar">
+          <section class="panel card">
+            <h2>Analytics summary</h2>
+            <div id="analytics-card" class="analytics-grid">
+              <div class="analytics-item"><span class="muted">Reports generated</span><strong>—</strong></div>
+              <div class="analytics-item"><span class="muted">Active clients</span><strong>—</strong></div>
+              <div class="analytics-item"><span class="muted">Imports</span><strong>—</strong></div>
+            </div>
+          </section>
+
+          <section class="panel card">
+            <h2>Add client</h2>
+            <form id="client-form" class="stack">
+              <label>Client name <input type="text" name="name" placeholder="Acme Co" required /></label>
+              <label>Industry <input type="text" name="industry" placeholder="B2B SaaS" /></label>
+              <button type="submit">Add client</button>
+            </form>
+          </section>
+
+          <section class="panel card">
+            <h2>Status</h2>
+            <pre id="status" class="status-box"></pre>
+          </section>
+        </aside>
+
+        <main class="content">
+          <section class="panel card">
+            <h2>Clients</h2>
+            <p class="muted">Manage imports, generate reports, preview exports, and share deliverables.</p>
+            <div id="client-list" class="client-list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
     <script>
       const token = localStorage.getItem('token');
       const status = document.getElementById('status');
       const list = document.getElementById('client-list');
       const form = document.getElementById('client-form');
       const refreshBtn = document.getElementById('refresh-btn');
+      const logoutBtn = document.getElementById('logout-btn');
+      const agencyName = document.getElementById('agency-name');
+      const analyticsCard = document.getElementById('analytics-card');
 
       if (!token) {
         window.location.href = '/login.html';
       }
 
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
       async function authFetch(path, options = {}) {
-        return fetch(path, {
+        const response = await fetch(path, {
           ...options,
           headers: {
             Authorization: `Bearer ${token}`,
             ...(options.headers || {}),
           },
         });
+
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          window.location.href = '/login.html';
+          throw new Error('Session expired');
+        }
+
+        return response;
       }
 
       async function api(path, options = {}) {
@@ -86,7 +98,8 @@
           return { ok: true, status: response.status, body: null };
         }
 
-        const body = await response.json();
+        const contentType = response.headers.get('content-type') || '';
+        const body = contentType.includes('application/json') ? await response.json() : await response.text();
         return { ok: response.ok, status: response.status, body };
       }
 
@@ -94,27 +107,35 @@
         return String(value)
           .replaceAll('&', '&amp;')
           .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;');
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function renderAnalytics(analytics) {
+        analyticsCard.innerHTML = `
+          <div class="analytics-item"><span class="muted">Reports generated</span><strong>${analytics.reports_generated}</strong></div>
+          <div class="analytics-item"><span class="muted">Active clients</span><strong>${analytics.clients_count}</strong></div>
+          <div class="analytics-item"><span class="muted">Imports</span><strong>${analytics.imports_count}</strong></div>
+        `;
       }
 
       function renderImports(client, imports) {
         if (!imports.length) {
-          return '<p>No imports yet.</p>';
+          return '<p class="list-empty">No imports yet.</p>';
         }
 
         return `
-          <ul class="import-list">
+          <ul>
             ${imports
               .map(
                 (item) => `
                   <li>
-                    <strong>${item.period}</strong>
-                    — ${item.source_type}
-                    — ${item.row_count} rows
+                    <strong>${escapeHtml(item.period)}</strong> · ${escapeHtml(item.source_type)} · ${item.row_count} rows
                     <div class="import-actions">
-                      <button type="button" data-action="view-import" data-client-id="${client.id}" data-import-id="${item.id}">View</button>
-                      <button type="button" data-action="generate-report" data-client-id="${client.id}" data-import-id="${item.id}" data-period="${item.period}">Generate report</button>
-                      <button type="button" data-action="delete-import" data-client-id="${client.id}" data-import-id="${item.id}">Delete</button>
+                      <button type="button" class="button-secondary" data-action="view-import" data-client-id="${client.id}" data-import-id="${item.id}">View</button>
+                      <button type="button" data-action="generate-report" data-client-id="${client.id}" data-import-id="${item.id}" data-period="${escapeHtml(item.period)}">Generate report</button>
+                      <button type="button" class="button-danger" data-action="delete-import" data-client-id="${client.id}" data-import-id="${item.id}">Delete</button>
                     </div>
                   </li>
                 `
@@ -126,24 +147,23 @@
 
       function renderReports(client, reports) {
         if (!reports.length) {
-          return '<p>No reports yet.</p>';
+          return '<p class="list-empty">No reports yet.</p>';
         }
 
         return `
-          <ul class="report-list">
+          <ul>
             ${reports
               .map(
                 (item) => `
                   <li>
-                    <strong>${item.period}</strong>
-                    — status: ${item.status}
+                    <strong>${escapeHtml(item.period)}</strong> · status: ${escapeHtml(item.status)}
                     <div class="report-actions">
-                      <button type="button" data-action="view-report" data-client-id="${client.id}" data-report-id="${item.id}">View</button>
-                      <button type="button" data-action="preview-report" data-client-id="${client.id}" data-report-id="${item.id}">Preview</button>
-                      <button type="button" data-action="download-pdf" data-client-id="${client.id}" data-report-id="${item.id}">Download PDF</button>
-                      <button type="button" data-action="create-share-link" data-client-id="${client.id}" data-report-id="${item.id}">Create share link</button>
-                      <button type="button" data-action="generate-email-draft" data-client-id="${client.id}" data-report-id="${item.id}">Generate email draft</button>
-                      <button type="button" data-action="delete-report" data-client-id="${client.id}" data-report-id="${item.id}">Delete</button>
+                      <button type="button" class="button-secondary" data-action="view-report" data-client-id="${client.id}" data-report-id="${item.id}">View</button>
+                      <button type="button" class="button-secondary" data-action="preview-report" data-client-id="${client.id}" data-report-id="${item.id}">Preview</button>
+                      <button type="button" class="button-secondary" data-action="download-pdf" data-client-id="${client.id}" data-report-id="${item.id}">Download PDF</button>
+                      <button type="button" class="button-secondary" data-action="create-share-link" data-client-id="${client.id}" data-report-id="${item.id}">Share link</button>
+                      <button type="button" class="button-secondary" data-action="generate-email-draft" data-client-id="${client.id}" data-report-id="${item.id}">Email draft</button>
+                      <button type="button" class="button-danger" data-action="delete-report" data-client-id="${client.id}" data-report-id="${item.id}">Delete</button>
                     </div>
                   </li>
                 `
@@ -166,14 +186,14 @@
           .join('');
 
         return `
-          <div>
-            <h3>Report #${report.id} — ${escapeHtml(report.period)}</h3>
-            <p>Status: ${escapeHtml(report.status)}</p>
+          <div class="panel card">
+            <h3>Report #${report.id} · ${escapeHtml(report.period)}</h3>
+            <p class="muted">Status: ${escapeHtml(report.status)}</p>
             ${sections}
-            <div class="report-actions">
+            <div class="section-actions">
               <button type="button" data-action="save-report" data-client-id="${report.client_id}" data-report-id="${report.id}">Save edits</button>
             </div>
-            <div class="stack export-tools">
+            <div class="stack">
               <label>
                 Share link
                 <textarea data-output="share-link" readonly placeholder="Create a share link to display it here."></textarea>
@@ -187,11 +207,33 @@
         `;
       }
 
+      async function loadAgency() {
+        const result = await api('/api/agency');
+        if (!result.ok) {
+          throw new Error(result.body.error || 'Failed to load agency');
+        }
+
+        agencyName.textContent = result.body.agency.name;
+      }
+
+      async function loadAnalytics() {
+        const result = await api('/api/analytics');
+        if (result.ok) {
+          renderAnalytics(result.body.analytics);
+        }
+      }
+
       async function loadClients() {
         const result = await api('/api/clients');
 
         if (!result.ok) {
-          status.textContent = result.body.error || 'Failed to load clients';
+          setStatus(result.body.error || 'Failed to load clients');
+          return;
+        }
+
+        if (!result.body.clients.length) {
+          list.innerHTML = '<div class="client-card"><p class="list-empty">No clients yet. Add your first one from the left panel.</p></div>';
+          setStatus('0 active client(s)');
           return;
         }
 
@@ -208,30 +250,42 @@
           const item = document.createElement('section');
           item.className = 'client-card';
           item.innerHTML = `
-            <h3>${client.name}</h3>
-            <p>${client.industry ? client.industry : 'No industry set'}</p>
+            <h3>${escapeHtml(client.name)}</h3>
+            <p class="client-meta">${escapeHtml(client.industry || 'No industry set')}</p>
             <div class="stack">
-              <form data-form="csv-import" data-client-id="${client.id}" enctype="multipart/form-data">
-                <input type="text" name="period" placeholder="Period (e.g. 2026-03)" required />
-                <input type="file" name="file" accept=".csv,text/csv" required />
+              <form data-form="csv-import" data-client-id="${client.id}" class="stack" enctype="multipart/form-data">
+                <label>Upload CSV
+                  <input type="text" name="period" placeholder="Period (e.g. 2026-03)" required />
+                  <input type="file" name="file" accept=".csv,text/csv" required />
+                </label>
                 <button type="submit">Upload CSV</button>
               </form>
-              <form data-form="gsheets-import" data-client-id="${client.id}">
-                <input type="text" name="period" placeholder="Period (e.g. March 2026)" required />
-                <input type="url" name="sheetsUrl" placeholder="Public Google Sheets URL" required />
-                <button type="submit">Import Google Sheet</button>
+              <form data-form="gsheets-import" data-client-id="${client.id}" class="stack">
+                <label>Import Google Sheet
+                  <input type="text" name="period" placeholder="Period (e.g. March 2026)" required />
+                  <input type="url" name="sheetsUrl" placeholder="Public Google Sheets URL" required />
+                </label>
+                <button type="submit">Import sheet</button>
               </form>
             </div>
-            <h4>Imports</h4>
-            ${renderImports(client, imports)}
-            <h4>Reports</h4>
-            ${renderReports(client, reports)}
+            <div class="list-block">
+              <h4>Imports</h4>
+              ${renderImports(client, imports)}
+            </div>
+            <div class="list-block">
+              <h4>Reports</h4>
+              ${renderReports(client, reports)}
+            </div>
             <div class="report-viewer"></div>
           `;
           list.appendChild(item);
         }
 
-        status.textContent = `${result.body.clients.length} active client(s)`;
+        setStatus(`${result.body.clients.length} active client(s)`);
+      }
+
+      async function refreshDashboard() {
+        await Promise.all([loadAgency(), loadAnalytics(), loadClients()]);
       }
 
       form.addEventListener('submit', async (event) => {
@@ -247,12 +301,13 @@
         });
 
         if (!result.ok) {
-          status.textContent = result.body.error || 'Failed to add client';
+          setStatus(result.body.error || 'Failed to add client');
           return;
         }
 
         form.reset();
-        await loadClients();
+        setStatus(`Added client ${result.body.client.name}`);
+        await refreshDashboard();
       });
 
       list.addEventListener('submit', async (event) => {
@@ -270,13 +325,13 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to upload CSV';
+            setStatus(result.body.error || 'Failed to upload CSV');
             return;
           }
 
           formEl.reset();
-          status.textContent = `CSV imported for period ${result.body.import.period}`;
-          await loadClients();
+          setStatus(`CSV imported for period ${result.body.import.period}`);
+          await refreshDashboard();
           return;
         }
 
@@ -291,13 +346,13 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to import Google Sheet';
+            setStatus(result.body.error || 'Failed to import Google Sheet');
             return;
           }
 
           formEl.reset();
-          status.textContent = `Google Sheet imported for period ${result.body.import.period}`;
-          await loadClients();
+          setStatus(`Google Sheet imported for period ${result.body.import.period}`);
+          await refreshDashboard();
         }
       });
 
@@ -313,9 +368,7 @@
 
         if (button.dataset.action === 'view-import') {
           const result = await api(`/api/clients/${clientId}/imports/${importId}`);
-          status.textContent = result.ok
-            ? JSON.stringify(result.body.import, null, 2)
-            : result.body.error || 'Failed to load import';
+          setStatus(result.ok ? JSON.stringify(result.body.import, null, 2) : result.body.error || 'Failed to load import');
         }
 
         if (button.dataset.action === 'generate-report') {
@@ -331,35 +384,35 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to generate report';
+            setStatus(result.body.error || 'Failed to generate report');
             return;
           }
 
-          status.textContent = `Report generated with status ${result.body.report.status}`;
+          setStatus(`Report generated with status ${result.body.report.status}`);
           if (reportViewer) {
             reportViewer.innerHTML = renderReportEditor(result.body.report);
           }
-          await loadClients();
+          await refreshDashboard();
         }
 
         if (button.dataset.action === 'view-report') {
           const result = await api(`/api/clients/${clientId}/reports/${reportId}`);
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to load report';
+            setStatus(result.body.error || 'Failed to load report');
             return;
           }
 
           if (reportViewer) {
             reportViewer.innerHTML = renderReportEditor(result.body.report);
           }
-          status.textContent = `Loaded report ${reportId}`;
+          setStatus(`Loaded report ${reportId}`);
         }
 
         if (button.dataset.action === 'preview-report') {
           const response = await authFetch(`/api/clients/${clientId}/reports/${reportId}/preview`);
           if (!response.ok) {
             const body = await response.json();
-            status.textContent = body.error || 'Failed to load preview';
+            setStatus(body.error || 'Failed to load preview');
             return;
           }
 
@@ -370,14 +423,14 @@
             previewWindow.document.write(html);
             previewWindow.document.close();
           }
-          status.textContent = `Opened preview for report ${reportId}`;
+          setStatus(`Opened preview for report ${reportId}`);
         }
 
         if (button.dataset.action === 'download-pdf') {
           const response = await authFetch(`/api/clients/${clientId}/reports/${reportId}/pdf`);
           if (!response.ok) {
             const body = await response.json();
-            status.textContent = body.error || 'Failed to download PDF';
+            setStatus(body.error || 'Failed to download PDF');
             return;
           }
 
@@ -390,7 +443,7 @@
           link.click();
           link.remove();
           URL.revokeObjectURL(url);
-          status.textContent = `Started PDF download for report ${reportId}`;
+          setStatus(`Started PDF download for report ${reportId}`);
         }
 
         if (button.dataset.action === 'create-share-link') {
@@ -410,7 +463,7 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to create share link';
+            setStatus(result.body.error || 'Failed to create share link');
             return;
           }
 
@@ -418,7 +471,7 @@
           if (output) {
             output.value = result.body.share_link.url;
           }
-          status.textContent = 'Share link created';
+          setStatus('Share link created');
         }
 
         if (button.dataset.action === 'generate-email-draft') {
@@ -431,7 +484,7 @@
 
           const result = await api(`/api/clients/${clientId}/reports/${reportId}/email-draft`);
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to generate email draft';
+            setStatus(result.body.error || 'Failed to generate email draft');
             return;
           }
 
@@ -443,7 +496,7 @@
           if (shareOutput) {
             shareOutput.value = result.body.email_draft.share_url;
           }
-          status.textContent = 'Email draft generated';
+          setStatus('Email draft generated');
         }
 
         if (button.dataset.action === 'save-report') {
@@ -466,15 +519,15 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to save report';
+            setStatus(result.body.error || 'Failed to save report');
             return;
           }
 
-          status.textContent = `Saved report ${reportId}`;
+          setStatus(`Saved report ${reportId}`);
           if (reportViewer) {
             reportViewer.innerHTML = renderReportEditor(result.body.report);
           }
-          await loadClients();
+          await refreshDashboard();
         }
 
         if (button.dataset.action === 'delete-import') {
@@ -483,12 +536,12 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to delete import';
+            setStatus(result.body.error || 'Failed to delete import');
             return;
           }
 
-          status.textContent = 'Import deleted';
-          await loadClients();
+          setStatus('Import deleted');
+          await refreshDashboard();
         }
 
         if (button.dataset.action === 'delete-report') {
@@ -497,20 +550,27 @@
           });
 
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to delete report';
+            setStatus(result.body.error || 'Failed to delete report');
             return;
           }
 
           if (reportViewer) {
             reportViewer.innerHTML = '';
           }
-          status.textContent = 'Report deleted';
-          await loadClients();
+          setStatus('Report deleted');
+          await refreshDashboard();
         }
       });
 
-      refreshBtn.addEventListener('click', loadClients);
-      loadClients();
+      refreshBtn.addEventListener('click', refreshDashboard);
+      logoutBtn.addEventListener('click', () => {
+        localStorage.removeItem('token');
+        window.location.href = '/login.html';
+      });
+
+      refreshDashboard().catch((error) => {
+        setStatus(error.message || 'Failed to load dashboard');
+      });
     </script>
   </body>
 </html>

@@ -3,19 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Login</title>
+    <title>Log in · Client Reporting Copilot</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="card">
-      <h1>Log in</h1>
-      <form id="login-form">
-        <label>Email <input type="email" name="email" required /></label>
-        <label>Password <input type="password" name="password" required /></label>
-        <button type="submit">Log in</button>
-      </form>
-      <p><a href="/register.html">Need an account?</a></p>
-      <pre id="status"></pre>
+    <main class="shell shell-center">
+      <section class="auth-card card">
+        <div class="badge">Welcome back</div>
+        <h1>Log in to your reporting workspace</h1>
+        <p class="auth-copy">Access clients, imports, generated reports, and share links from one dashboard.</p>
+        <form id="login-form" class="auth-form">
+          <label>Email <input type="email" name="email" required /></label>
+          <label>Password <input type="password" name="password" required /></label>
+          <div class="auth-actions">
+            <button type="submit">Log in</button>
+            <a class="button-link button-link-secondary" href="/register.html">Create account</a>
+          </div>
+        </form>
+        <p class="auth-footer">Need a new workspace? <a href="/register.html">Register your agency</a>.</p>
+        <pre id="status" class="status-box"></pre>
+      </section>
     </main>
     <script>
       const form = document.getElementById('login-form');
@@ -23,8 +30,8 @@
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const data = new FormData(form);
-        const payload = Object.fromEntries(data.entries());
+        status.textContent = 'Logging in…';
+        const payload = Object.fromEntries(new FormData(form).entries());
 
         const response = await fetch('/api/auth/login', {
           method: 'POST',
