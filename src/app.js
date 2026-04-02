@@ -4,11 +4,13 @@ const os = require('os');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createDatabase } = require('./db');
-const { authMiddleware, signToken } = require('./auth');
+const { authMiddleware, signToken, optionalAuthMiddleware } = require('./auth');
 const { buildEmailDraft, buildReportHtml } = require('./reportRender');
 const {
   DEFAULT_REPORT_TEMPLATE,
@@ -114,6 +116,36 @@ function parseGoogleSheetInput(input) {
   };
 }
 
+function isBrowserRequest(req) {
+  const accept = String(req.headers.accept || '');
+  return req.method === 'GET' && accept.includes('text/html') && !req.path.startsWith('/api/');
+}
+
+function renderErrorPage({ statusCode, title, message }) {
+  return `<!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>${statusCode} · ${title}</title>
+      <link rel="stylesheet" href="/styles.css" />
+    </head>
+    <body>
+      <main class="shell error-shell">
+        <section class="error-card card">
+          <div class="error-code">Error ${statusCode}</div>
+          <h1>${title}</h1>
+          <p class="muted">${message}</p>
+          <div class="hero-actions">
+            <a class="button-link" href="/">Go home</a>
+            <a class="button-link button-link-secondary" href="/login.html">Log in</a>
+          </div>
+        </section>
+      </main>
+    </body>
+  </html>`;
+}
+
 function createApp(options = {}) {
   const app = express();
   const db = options.db || createDatabase();
@@ -123,10 +155,44 @@ function createApp(options = {}) {
   const reportEngine = options.reportEngine || new ReportEngine(options.reportEngineOptions);
   const puppeteer = options.puppeteer || require('puppeteer');
   const appBaseUrl = String(options.appBaseUrl || process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const corsOrigin = process.env.CORS_ORIGIN;
+  const authRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many auth attempts, try again in a minute' },
+  });
 
-  app.use(cors());
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
+
+  app.use((req, res, next) => {
+    const start = process.hrtime.bigint();
+    res.on('finish', () => {
+      const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
+      console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs.toFixed(1)}ms`);
+    });
+    next();
+  });
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    })
+  );
+  app.use(
+    cors(
+      corsOrigin
+        ? {
+            origin: corsOrigin,
+          }
+        : undefined
+    )
+  );
   app.use(express.json());
-  app.use(express.static(path.resolve(__dirname, '..', 'public')));
+  app.use(express.static(path.resolve(__dirname, '..', 'public'), { index: false }));
 
   const selectAgencyByEmail = db.prepare('SELECT * FROM agencies WHERE email = ?');
   const selectAgencyById = db.prepare(
@@ -137,6 +203,21 @@ function createApp(options = {}) {
   );
   const updateAgency = db.prepare(
     'UPDATE agencies SET name = ?, logo_url = ?, brand_color = ? WHERE id = ?'
+  );
+  const countClientsForAgency = db.prepare(
+    'SELECT COUNT(*) AS total FROM clients WHERE agency_id = ? AND archived_at IS NULL'
+  );
+  const countImportsForAgency = db.prepare(
+    `SELECT COUNT(*) AS total
+     FROM data_imports di
+     INNER JOIN clients c ON c.id = di.client_id
+     WHERE c.agency_id = ? AND c.archived_at IS NULL`
+  );
+  const countReportsForAgency = db.prepare(
+    `SELECT COUNT(*) AS total
+     FROM reports r
+     INNER JOIN clients c ON c.id = r.client_id
+     WHERE c.agency_id = ? AND c.archived_at IS NULL`
   );
 
   const insertClient = db.prepare(
@@ -344,7 +425,14 @@ function createApp(options = {}) {
     }
   }
 
-  app.post('/api/auth/register', async (req, res) => {
+  app.get('/', optionalAuthMiddleware, (req, res) => {
+    if (req.auth?.sub) {
+      return res.redirect('/dashboard.html');
+    }
+    return res.sendFile(path.resolve(__dirname, '..', 'public', 'index.html'));
+  });
+
+  app.post('/api/auth/register', authRateLimiter, async (req, res) => {
     const { email, password, agencyName } = req.body || {};
 
     if (!email || !password || !agencyName) {
@@ -365,7 +453,7 @@ function createApp(options = {}) {
     return res.status(201).json({ token, agency: sanitizeAgency(agency) });
   });
 
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', authRateLimiter, async (req, res) => {
     const { email, password } = req.body || {};
 
     if (!email || !password) {
@@ -394,6 +482,16 @@ function createApp(options = {}) {
   app.get('/api/agency', authMiddleware, (req, res) => {
     const agency = selectAgencyById.get(req.auth.sub);
     return res.json({ agency: sanitizeAgency(agency) });
+  });
+
+  app.get('/api/analytics', authMiddleware, (req, res) => {
+    return res.json({
+      analytics: {
+        reports_generated: countReportsForAgency.get(req.auth.sub).total,
+        clients_count: countClientsForAgency.get(req.auth.sub).total,
+        imports_count: countImportsForAgency.get(req.auth.sub).total,
+      },
+    });
   });
 
   app.put('/api/agency', authMiddleware, (req, res) => {
@@ -765,6 +863,15 @@ function createApp(options = {}) {
     const shared = selectShareLinkByToken.get(String(req.params.token || '').trim());
 
     if (!shared || shared.archived_at || isExpired(shared.expires_at)) {
+      if (String(req.headers.accept || '').includes('text/html')) {
+        return res.status(404).send(
+          renderErrorPage({
+            statusCode: 404,
+            title: 'Share link not found',
+            message: 'This report link is invalid, expired, or no longer available.',
+          })
+        );
+      }
       return res.status(404).send('Not found');
     }
 
@@ -885,6 +992,40 @@ function createApp(options = {}) {
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true });
+  });
+
+  app.use((req, res) => {
+    if (isBrowserRequest(req)) {
+      return res.status(404).send(
+        renderErrorPage({
+          statusCode: 404,
+          title: 'Page not found',
+          message: 'The page you requested does not exist or has moved.',
+        })
+      );
+    }
+
+    return res.status(404).json({ error: 'Not found' });
+  });
+
+  app.use((error, req, res, _next) => {
+    console.error(error);
+
+    if (res.headersSent) {
+      return;
+    }
+
+    if (isBrowserRequest(req)) {
+      return res.status(500).send(
+        renderErrorPage({
+          statusCode: 500,
+          title: 'Something went wrong',
+          message: 'The app hit an unexpected error. Please try again in a moment.',
+        })
+      );
+    }
+
+    return res.status(500).json({ error: 'Internal server error' });
   });
 
   app.locals.db = db;

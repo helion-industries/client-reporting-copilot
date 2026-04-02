@@ -28,13 +28,32 @@ function authMiddleware(req, res, next) {
     const payload = jwt.verify(token, getJwtSecret());
     req.auth = payload;
     next();
-  } catch (error) {
+  } catch (_error) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
 
+function optionalAuthMiddleware(req, _res, next) {
+  const header = req.headers.authorization;
+
+  if (!header || !header.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = header.slice('Bearer '.length).trim();
+
+  try {
+    req.auth = jwt.verify(token, getJwtSecret());
+  } catch (_error) {
+    req.auth = null;
+  }
+
+  return next();
+}
+
 module.exports = {
   authMiddleware,
+  optionalAuthMiddleware,
   signToken,
   getJwtSecret,
 };

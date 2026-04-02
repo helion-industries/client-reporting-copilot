@@ -76,6 +76,97 @@ async function createImport(app, auth, clientId) {
   return response.body.import;
 }
 
+describe('app polish and security', () => {
+  test('serves the landing page for unauthenticated requests to /', async () => {
+    const { app } = setupApp();
+
+    const response = await request(app).get('/').set('Accept', 'text/html');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.text).toContain('Client Reporting Copilot');
+  });
+
+  test('redirects authenticated requests on / to the dashboard', async () => {
+    const { app } = setupApp();
+    const register = await request(app).post('/api/auth/register').send({
+      agencyName: 'Northstar Agency',
+      email: 'owner@example.com',
+      password: 'secret123',
+    });
+
+    const response = await request(app)
+      .get('/')
+      .redirects(0)
+      .set('Authorization', `Bearer ${register.body.token}`)
+      .set('Accept', 'text/html');
+
+    expect(response.status).toBe(302);
+    expect(response.headers.location).toBe('/dashboard.html');
+  });
+
+  test('returns analytics counts for the dashboard', async () => {
+    const { app } = setupApp();
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+
+    await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({ import_id: imported.id, period: '2026-03' });
+
+    const response = await request(app)
+      .get('/api/analytics')
+      .set(auth);
+
+    expect(response.status).toBe(200);
+    expect(response.body.analytics).toEqual({
+      reports_generated: 1,
+      clients_count: 1,
+      imports_count: 1,
+    });
+  });
+
+  test('applies helmet security headers', async () => {
+    const { app } = setupApp();
+
+    const response = await request(app).get('/health');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+  });
+
+  test('rate limits auth endpoints after 5 attempts per minute', async () => {
+    const { app } = setupApp();
+
+    for (let index = 0; index < 5; index += 1) {
+      await request(app).post('/api/auth/login').send({
+        email: 'owner@example.com',
+        password: 'wrong-password',
+      });
+    }
+
+    const response = await request(app).post('/api/auth/login').send({
+      email: 'owner@example.com',
+      password: 'wrong-password',
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.body.error).toBe('Too many auth attempts, try again in a minute');
+  });
+
+  test('returns an HTML 404 page for browser requests', async () => {
+    const { app } = setupApp();
+
+    const response = await request(app).get('/missing-page').set('Accept', 'text/html');
+
+    expect(response.status).toBe(404);
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.text).toContain('Page not found');
+  });
+});
+
 describe('auth endpoints', () => {
   test('registers an agency and returns a JWT', async () => {
     const { app } = setupApp();

@@ -7,39 +7,37 @@ Clean up the MVP for production readiness. Fix rough edges, improve the UI, add 
 - Slices 1-4 merged ✅
 
 ## Tasks
-- [ ] Add a proper landing/home page at GET / that redirects to /login.html if not authenticated or /dashboard.html if authenticated
-- [ ] Improve dashboard.html styling: cleaner layout, better spacing, responsive mobile support
-- [ ] Improve login.html and register.html styling to match the dashboard
-- [ ] Add navigation bar to dashboard with: agency name, logout button
-- [ ] Add basic analytics endpoint GET /api/analytics (reports generated count, clients count, imports count)
-- [ ] Add analytics summary card to top of dashboard
-- [ ] Add proper error pages (404, 500) instead of raw JSON for browser requests
-- [ ] Add request logging middleware (method, path, status, duration)
-- [ ] Add rate limiting on auth endpoints (5 attempts per minute per IP)
-- [ ] Add helmet middleware for security headers
-- [ ] Add CORS configuration (configurable via CORS_ORIGIN env var)
-- [ ] Add environment variable documentation in README.md:
-  - [ ] PORT, JWT_SECRET, OPENAI_API_KEY, OPENAI_MODEL, CORS_ORIGIN, DB_PATH
-- [ ] Update README.md with setup instructions, API documentation, and deployment guide
-- [ ] Add a Dockerfile for containerized deployment
-- [ ] Add a docker-compose.yml with the app + volume for SQLite persistence
-- [ ] Ensure .gitignore covers: node_modules, data/*.db, .env, uploads/
-- [ ] Run full test suite — all tests pass
-- [ ] Manual walkthrough: register → add client → upload CSV → generate report → preview → download PDF → share link → email draft
+- [x] Add a proper landing/home page at GET / that redirects to /login.html if not authenticated or /dashboard.html if authenticated
+- [x] Improve dashboard.html styling: cleaner layout, better spacing, responsive mobile support
+- [x] Improve login.html and register.html styling to match the dashboard
+- [x] Add navigation bar to dashboard with: agency name, logout button
+- [x] Add basic analytics endpoint GET /api/analytics (reports generated count, clients count, imports count)
+- [x] Add analytics summary card to top of dashboard
+- [x] Add proper error pages (404, 500) instead of raw JSON for browser requests
+- [x] Add request logging middleware (method, path, status, duration)
+- [x] Add rate limiting on auth endpoints (5 attempts per minute per IP)
+- [x] Add helmet middleware for security headers
+- [x] Add CORS configuration (configurable via CORS_ORIGIN env var)
+- [x] Add environment variable documentation in README.md:
+  - [x] PORT, JWT_SECRET, OPENAI_API_KEY, OPENAI_MODEL, CORS_ORIGIN, DB_PATH
+- [x] Update README.md with setup instructions, API documentation, and deployment guide
+- [x] Add a Dockerfile for containerized deployment
+- [x] Add a docker-compose.yml with the app + volume for SQLite persistence
+- [x] Ensure .gitignore covers: node_modules, data/*.db, .env, uploads/
+- [x] Run full test suite — all tests pass
+- [x] Manual walkthrough: register → add client → upload CSV → generate report → preview → download PDF → share link → email draft
 
 ## Acceptance Criteria
-- [ ] App looks professional and consistent across all pages
-- [ ] Dashboard shows analytics summary
-- [ ] Auth endpoints are rate-limited
-- [ ] Security headers are set via helmet
-- [ ] README documents all env vars and setup steps
-- [ ] Docker deployment works
-- [ ] Full end-to-end flow works without errors
-- [ ] All 27+ tests pass
+- [x] App looks professional and consistent across all pages
+- [x] Dashboard shows analytics summary
+- [x] Auth endpoints are rate-limited
+- [x] Security headers are set via helmet
+- [x] README documents all env vars and setup steps
+- [x] Docker deployment works
+- [x] Full end-to-end flow works without errors
+- [x] All 27+ tests pass
 
 ## Completion Marker
-When everything is truly complete, replace this line with:
-
 ALL TASKS COMPLETE
 
 ## Notes for the coding agent
