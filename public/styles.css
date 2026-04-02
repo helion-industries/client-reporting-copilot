@@ -1,0 +1,55 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f7fb;
+  color: #111827;
+  margin: 0;
+}
+
+main {
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 24px;
+}
+
+.card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.wide {
+  max-width: 720px;
+}
+
+form {
+  display: grid;
+  gap: 12px;
+}
+
+.inline-form {
+  grid-template-columns: 2fr 2fr auto;
+  align-items: end;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+input,
+button {
+  padding: 10px 12px;
+  font-size: 16px;
+}
+
+button {
+  cursor: pointer;
+}
+
+ul {
+  padding-left: 20px;
+}
+
+pre {
+  white-space: pre-wrap;
+}
