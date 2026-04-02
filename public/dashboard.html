@@ -5,6 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
     <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .client-card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+      .client-card h3 {
+        margin: 0 0 0.5rem;
+      }
+      .import-list {
+        margin-top: 0.75rem;
+        padding-left: 1rem;
+      }
+      .import-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+      }
+      .stack {
+        display: grid;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+    </style>
   </head>
   <body>
     <main class="card wide">
@@ -15,7 +41,7 @@
         <button type="submit">Add client</button>
       </form>
       <button id="refresh-btn" type="button">Refresh clients</button>
-      <ul id="client-list"></ul>
+      <div id="client-list"></div>
       <pre id="status"></pre>
     </main>
     <script>
@@ -29,50 +55,186 @@
         window.location.href = '/login.html';
       }
 
-      async function loadClients() {
-        const response = await fetch('/api/clients', {
-          headers: { Authorization: `Bearer ${token}` },
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(options.headers || {}),
+          },
         });
 
-        const body = await response.json();
+        if (response.status === 204) {
+          return { ok: true, status: response.status, body: null };
+        }
 
-        if (!response.ok) {
-          status.textContent = body.error || 'Failed to load clients';
+        const body = await response.json();
+        return { ok: response.ok, status: response.status, body };
+      }
+
+      function renderImports(client, imports) {
+        if (!imports.length) {
+          return '<p>No imports yet.</p>';
+        }
+
+        return `
+          <ul class="import-list">
+            ${imports
+              .map(
+                (item) => `
+                  <li>
+                    <strong>${item.period}</strong>
+                    — ${item.source_type}
+                    — ${item.row_count} rows
+                    <div class="import-actions">
+                      <button type="button" data-action="view-import" data-client-id="${client.id}" data-import-id="${item.id}">View</button>
+                      <button type="button" data-action="delete-import" data-client-id="${client.id}" data-import-id="${item.id}">Delete</button>
+                    </div>
+                  </li>
+                `
+              )
+              .join('')}
+          </ul>
+        `;
+      }
+
+      async function loadClients() {
+        const result = await api('/api/clients');
+
+        if (!result.ok) {
+          status.textContent = result.body.error || 'Failed to load clients';
           return;
         }
 
         list.innerHTML = '';
-        body.clients.forEach((client) => {
-          const item = document.createElement('li');
-          item.textContent = `${client.name}${client.industry ? ` — ${client.industry}` : ''}`;
-          list.appendChild(item);
-        });
 
-        status.textContent = `${body.clients.length} active client(s)`;
+        for (const client of result.body.clients) {
+          const importsResult = await api(`/api/clients/${client.id}/imports`);
+          const imports = importsResult.ok ? importsResult.body.imports : [];
+
+          const item = document.createElement('section');
+          item.className = 'client-card';
+          item.innerHTML = `
+            <h3>${client.name}</h3>
+            <p>${client.industry ? client.industry : 'No industry set'}</p>
+            <div class="stack">
+              <form data-form="csv-import" data-client-id="${client.id}" enctype="multipart/form-data">
+                <input type="text" name="period" placeholder="Period (e.g. 2026-03)" required />
+                <input type="file" name="file" accept=".csv,text/csv" required />
+                <button type="submit">Upload CSV</button>
+              </form>
+              <form data-form="gsheets-import" data-client-id="${client.id}">
+                <input type="text" name="period" placeholder="Period (e.g. March 2026)" required />
+                <input type="url" name="sheetsUrl" placeholder="Public Google Sheets URL" required />
+                <button type="submit">Import Google Sheet</button>
+              </form>
+            </div>
+            <h4>Imports</h4>
+            ${renderImports(client, imports)}
+          `;
+          list.appendChild(item);
+        }
+
+        status.textContent = `${result.body.clients.length} active client(s)`;
       }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const payload = Object.fromEntries(new FormData(form).entries());
 
-        const response = await fetch('/api/clients', {
+        const result = await api('/api/clients', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(payload),
         });
 
-        const body = await response.json();
-
-        if (!response.ok) {
-          status.textContent = body.error || 'Failed to add client';
+        if (!result.ok) {
+          status.textContent = result.body.error || 'Failed to add client';
           return;
         }
 
         form.reset();
         await loadClients();
+      });
+
+      list.addEventListener('submit', async (event) => {
+        const formEl = event.target;
+        const clientId = formEl.dataset.clientId;
+        if (!clientId) return;
+
+        event.preventDefault();
+
+        if (formEl.dataset.form === 'csv-import') {
+          const formData = new FormData(formEl);
+          const result = await api(`/api/clients/${clientId}/imports/csv`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to upload CSV';
+            return;
+          }
+
+          formEl.reset();
+          status.textContent = `CSV imported for period ${result.body.import.period}`;
+          await loadClients();
+          return;
+        }
+
+        if (formEl.dataset.form === 'gsheets-import') {
+          const payload = Object.fromEntries(new FormData(formEl).entries());
+          const result = await api(`/api/clients/${clientId}/imports/gsheets`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to import Google Sheet';
+            return;
+          }
+
+          formEl.reset();
+          status.textContent = `Google Sheet imported for period ${result.body.import.period}`;
+          await loadClients();
+        }
+      });
+
+      list.addEventListener('click', async (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+
+        const clientId = button.dataset.clientId;
+        const importId = button.dataset.importId;
+
+        if (button.dataset.action === 'view-import') {
+          const result = await api(`/api/clients/${clientId}/imports/${importId}`);
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to load import';
+            return;
+          }
+
+          status.textContent = JSON.stringify(result.body.import, null, 2);
+        }
+
+        if (button.dataset.action === 'delete-import') {
+          const result = await api(`/api/clients/${clientId}/imports/${importId}`, {
+            method: 'DELETE',
+          });
+
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to delete import';
+            return;
+          }
+
+          status.textContent = 'Import deleted';
+          await loadClients();
+        }
       });
 
       refreshBtn.addEventListener('click', loadClients);

@@ -1,13 +1,117 @@
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const { parse } = require('csv-parse/sync');
 const { createDatabase } = require('./db');
 const { authMiddleware, signToken } = require('./auth');
+
+const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024;
+
+function createUploadMiddleware(uploadDir) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+
+  return multer({
+    dest: uploadDir,
+    limits: {
+      fileSize: MAX_UPLOAD_SIZE_BYTES,
+    },
+    fileFilter: (_req, file, cb) => {
+      const extension = path.extname(file.originalname || '').toLowerCase();
+      const mimeType = String(file.mimetype || '').toLowerCase();
+      const looksLikeCsv =
+        extension === '.csv' ||
+        mimeType.includes('csv') ||
+        mimeType === 'text/plain' ||
+        mimeType === 'application/vnd.ms-excel';
+
+      if (!looksLikeCsv) {
+        return cb(new Error('Only CSV files are allowed'));
+      }
+
+      return cb(null, true);
+    },
+  });
+}
+
+function parseCsvText(csvText) {
+  const trimmed = String(csvText || '').trim();
+
+  if (!trimmed) {
+    throw new Error('CSV file is empty');
+  }
+
+  const records = parse(trimmed, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  });
+
+  if (!records.length) {
+    throw new Error('CSV file must include headers and at least one data row');
+  }
+
+  const headers = Object.keys(records[0]);
+
+  if (!headers.length) {
+    throw new Error('CSV file must include a header row');
+  }
+
+  return {
+    headers,
+    rows: records,
+    rowCount: records.length,
+  };
+}
+
+function parseGoogleSheetInput(input) {
+  const value = String(input || '').trim();
+
+  if (!value) {
+    throw new Error('sheetsUrl or sheetId is required');
+  }
+
+  if (/^[a-zA-Z0-9-_]+$/.test(value) && !value.includes('http')) {
+    return {
+      sheetId: value,
+      exportUrl: `https://docs.google.com/spreadsheets/d/${value}/export?format=csv`,
+    };
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(value);
+  } catch (_error) {
+    throw new Error('Invalid Google Sheets URL');
+  }
+
+  const match = parsedUrl.pathname.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match) {
+    throw new Error('Invalid Google Sheets URL');
+  }
+
+  const gid = parsedUrl.searchParams.get('gid');
+  const exportUrl = new URL(`https://docs.google.com/spreadsheets/d/${match[1]}/export`);
+  exportUrl.searchParams.set('format', 'csv');
+  if (gid) {
+    exportUrl.searchParams.set('gid', gid);
+  }
+
+  return {
+    sheetId: match[1],
+    exportUrl: exportUrl.toString(),
+  };
+}
 
 function createApp(options = {}) {
   const app = express();
   const db = options.db || createDatabase();
+  const fetchImpl = options.fetch || global.fetch;
+  const uploadDir = options.uploadDir || path.join(os.tmpdir(), 'client-reporting-imports');
+  const upload = createUploadMiddleware(uploadDir);
 
   app.use(cors());
   app.use(express.json());
@@ -45,6 +149,36 @@ function createApp(options = {}) {
     'UPDATE clients SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND agency_id = ? AND archived_at IS NULL'
   );
 
+  const insertImport = db.prepare(
+    `INSERT INTO data_imports (
+      client_id,
+      period,
+      source_type,
+      raw_data_json,
+      column_headers_json,
+      row_count
+    ) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const listImports = db.prepare(
+    `SELECT di.id, di.client_id, di.period, di.source_type, di.row_count, di.created_at
+     FROM data_imports di
+     INNER JOIN clients c ON c.id = di.client_id
+     WHERE di.client_id = ? AND c.agency_id = ? AND c.archived_at IS NULL
+     ORDER BY di.period DESC, di.id DESC`
+  );
+  const selectImport = db.prepare(
+    `SELECT di.*, c.agency_id, c.archived_at
+     FROM data_imports di
+     INNER JOIN clients c ON c.id = di.client_id
+     WHERE di.id = ? AND di.client_id = ? AND c.agency_id = ?`
+  );
+  const deleteImport = db.prepare(
+    `DELETE FROM data_imports
+     WHERE id = ? AND client_id = ? AND client_id IN (
+       SELECT id FROM clients WHERE agency_id = ? AND archived_at IS NULL
+     )`
+  );
+
   function sanitizeAgency(row) {
     if (!row) return null;
     return {
@@ -55,6 +189,34 @@ function createApp(options = {}) {
       brand_color: row.brand_color,
       created_at: row.created_at,
     };
+  }
+
+  function serializeImport(row, { includeData = false } = {}) {
+    if (!row) return null;
+
+    const base = {
+      id: row.id,
+      client_id: row.client_id,
+      period: row.period,
+      source_type: row.source_type,
+      row_count: row.row_count,
+      created_at: row.created_at,
+      column_headers: JSON.parse(row.column_headers_json || '[]'),
+    };
+
+    if (includeData) {
+      base.raw_data = JSON.parse(row.raw_data_json || '[]');
+    }
+
+    return base;
+  }
+
+  function requireActiveClient(clientId, agencyId) {
+    const client = selectClient.get(clientId, agencyId);
+    if (!client || client.archived_at) {
+      return null;
+    }
+    return client;
   }
 
   app.post('/api/auth/register', async (req, res) => {
@@ -176,6 +338,149 @@ function createApp(options = {}) {
     return res.status(204).send();
   });
 
+  app.post('/api/clients/:id/imports/csv', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    upload.single('file')(req, res, async (error) => {
+      if (error) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'CSV file must be 5MB or smaller' });
+        }
+        return res.status(400).json({ error: error.message || 'Upload failed' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'CSV file is required' });
+      }
+
+      const period = String(req.body?.period || '').trim();
+      if (!period) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ error: 'period is required' });
+      }
+
+      try {
+        const csvText = await fs.promises.readFile(req.file.path, 'utf8');
+        const parsed = parseCsvText(csvText);
+
+        const result = insertImport.run(
+          clientId,
+          period,
+          'csv',
+          JSON.stringify(parsed.rows),
+          JSON.stringify(parsed.headers),
+          parsed.rowCount
+        );
+
+        const created = selectImport.get(result.lastInsertRowid, clientId, req.auth.sub);
+        return res.status(201).json({ import: serializeImport(created, { includeData: true }) });
+      } catch (parseError) {
+        return res.status(400).json({ error: parseError.message || 'Failed to parse CSV file' });
+      } finally {
+        fs.unlink(req.file.path, () => {});
+      }
+    });
+  });
+
+  app.post('/api/clients/:id/imports/gsheets', authMiddleware, async (req, res) => {
+    const clientId = Number(req.params.id);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const period = String(req.body?.period || '').trim();
+    if (!period) {
+      return res.status(400).json({ error: 'period is required' });
+    }
+
+    let parsedSheet;
+    try {
+      parsedSheet = parseGoogleSheetInput(req.body?.sheetsUrl || req.body?.sheetId);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    if (!fetchImpl) {
+      return res.status(500).json({ error: 'Fetch is not available on this server' });
+    }
+
+    try {
+      const response = await fetchImpl(parsedSheet.exportUrl);
+      if (!response.ok) {
+        return res.status(400).json({ error: 'Failed to fetch Google Sheet. Ensure the sheet is public.' });
+      }
+
+      const csvText = await response.text();
+      const parsed = parseCsvText(csvText);
+      const result = insertImport.run(
+        clientId,
+        period,
+        'gsheets',
+        JSON.stringify(parsed.rows),
+        JSON.stringify(parsed.headers),
+        parsed.rowCount
+      );
+
+      const created = selectImport.get(result.lastInsertRowid, clientId, req.auth.sub);
+      return res.status(201).json({ import: serializeImport(created, { includeData: true }) });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Failed to import Google Sheet' });
+    }
+  });
+
+  app.get('/api/clients/:id/imports', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const imports = listImports.all(clientId, req.auth.sub).map((row) => serializeImport(row));
+    return res.json({ imports });
+  });
+
+  app.get('/api/clients/:id/imports/:importId', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const importId = Number(req.params.importId);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const imported = selectImport.get(importId, clientId, req.auth.sub);
+    if (!imported || imported.archived_at) {
+      return res.status(404).json({ error: 'Import not found' });
+    }
+
+    return res.json({ import: serializeImport(imported, { includeData: true }) });
+  });
+
+  app.delete('/api/clients/:id/imports/:importId', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const importId = Number(req.params.importId);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const result = deleteImport.run(importId, clientId, req.auth.sub);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Import not found' });
+    }
+
+    return res.status(204).send();
+  });
+
   app.get('/health', (_req, res) => {
     res.json({ ok: true });
   });
@@ -187,4 +492,7 @@ function createApp(options = {}) {
 
 module.exports = {
   createApp,
+  MAX_UPLOAD_SIZE_BYTES,
+  parseCsvText,
+  parseGoogleSheetInput,
 };

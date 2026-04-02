@@ -40,6 +40,18 @@ function createDatabase() {
       archived_at TEXT,
       FOREIGN KEY (agency_id) REFERENCES agencies(id)
     );
+
+    CREATE TABLE IF NOT EXISTS data_imports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      period TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      raw_data_json TEXT NOT NULL,
+      column_headers_json TEXT NOT NULL,
+      row_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id)
+    );
   `);
 
   return db;
