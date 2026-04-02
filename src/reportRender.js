@@ -12,36 +12,73 @@ function normalizeHexColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#1f6feb';
 }
 
+function markdownToHtml(text) {
+  if (!text) return '<p>No content available.</p>';
+  const lines = String(text).trim().split('\n');
+  const output = [];
+  let listItems = [];
+  let listType = null;
+
+  function flushList() {
+    if (listItems.length === 0) return;
+    const tag = listType === 'ol' ? 'ol' : 'ul';
+    output.push(`<${tag}>${listItems.join('')}</${tag}>`);
+    listItems = [];
+    listType = null;
+  }
+
+  function processInline(line) {
+    return line
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
+  }
+
+  let paraLines = [];
+  function flushPara() {
+    if (paraLines.length === 0) return;
+    output.push('<p>' + paraLines.map(processInline).join('<br>') + '</p>');
+    paraLines = [];
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const numbered = line.match(/^\d+\.\s+(.*)/);
+    const bullet = line.match(/^[-*]\s+(.*)/);
+    const h3 = line.match(/^###\s+(.*)/);
+    const h2 = line.match(/^##\s+(.*)/);
+    const h1 = line.match(/^#\s+(.*)/);
+
+    if (h3 || h2 || h1) {
+      flushList(); flushPara();
+      const lvl = h3 ? 3 : h2 ? 2 : 1;
+      const content = processInline((h3 || h2 || h1)[1]);
+      output.push(`<h${lvl}>${content}</h${lvl}>`);
+    } else if (numbered) {
+      flushPara();
+      if (listType && listType !== 'ol') flushList();
+      listType = 'ol';
+      // Strip any residual leading number from AI content then add to plain ul
+      const numberedContent = numbered[1].replace(/^\d+\.\s*/, '');
+      listItems.push(`<li>${processInline(numberedContent)}</li>`);
+    } else if (bullet) {
+      flushPara();
+      if (listType && listType !== 'ul') flushList();
+      listType = 'ul';
+      listItems.push(`<li>${processInline(bullet[1])}</li>`);
+    } else if (line === '') {
+      if (listType !== 'ol') flushList();
+      flushPara();
+    } else {
+      if (listType !== 'ol') flushList();
+      paraLines.push(line);
+    }
+  }
+  flushList(); flushPara();
+  return output.join('\n') || '<p>No content available.</p>';
+}
+
 function renderSectionContent(content) {
-  const text = String(content || '').trim();
-  if (!text) {
-    return '<p>No content available.</p>';
-  }
-
-  if (text.includes('\n- ') || text.startsWith('- ')) {
-    const items = text
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.replace(/^[-*]\s*/, ''));
-
-    return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
-  }
-
-  if (/^\d+\.\s/m.test(text)) {
-    const items = text
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.replace(/^\d+\.\s*/, ''));
-
-    return `<ol>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`;
-  }
-
-  return text
-    .split(/\n{2,}/)
-    .map((paragraph) => `<p>${escapeHtml(paragraph).replaceAll('\n', '<br />')}</p>`)
-    .join('');
+  return markdownToHtml(content);
 }
 
 function buildReportHtml({ agency, client, report, shareUrl = null, isShared = false }) {
