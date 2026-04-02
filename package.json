@@ -1,0 +1,18 @@
+{
+  "name": "client-reporting-copilot",
+  "version": "0.1.0",
+  "description": "AI-powered client reporting and QBR pack generator for agencies",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node src/index.js",
+    "start": "node src/index.js",
+    "test": "jest --verbose"
+  },
+  "keywords": ["reporting", "agency", "ai", "qbr"],
+  "author": "Helion Industries",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
