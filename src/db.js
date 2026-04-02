@@ -52,6 +52,20 @@ function createDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (client_id) REFERENCES clients(id)
     );
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      import_id INTEGER NOT NULL,
+      period TEXT NOT NULL,
+      template_config_json TEXT NOT NULL,
+      sections_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'generated',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (import_id) REFERENCES data_imports(id)
+    );
   `);
 
   return db;
