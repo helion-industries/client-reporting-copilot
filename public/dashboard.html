@@ -615,7 +615,8 @@
             html += `
               <div class="billing-actions">
                 <button type="button" class="button-link" id="upgrade-starter-btn">Upgrade to Starter ($49/mo)</button>
-                <button type="button" class="button-link button-link-secondary" id="upgrade-pro-btn">Upgrade to Pro ($99/mo)</button>
+                <button type="button" class="button-link" id="upgrade-growth-btn">Upgrade to Growth ($149/mo)</button>
+                <button type="button" class="button-link button-link-secondary" id="upgrade-agency-btn">Upgrade to Agency ($349/mo)</button>
               </div>
             `;
           } else if (isPaidPlan) {
@@ -630,46 +631,33 @@
 
           // Bind billing button actions
           const upgradeStarterBtn = document.getElementById('upgrade-starter-btn');
-          const upgradeProBtn = document.getElementById('upgrade-pro-btn');
+          const upgradeGrowthBtn = document.getElementById('upgrade-growth-btn');
+          const upgradeAgencyBtn = document.getElementById('upgrade-agency-btn');
           const manageBillingBtn = document.getElementById('manage-billing-btn');
 
-          if (upgradeStarterBtn) {
-            upgradeStarterBtn.addEventListener('click', async () => {
-              upgradeStarterBtn.disabled = true;
-              upgradeStarterBtn.textContent = 'Redirecting…';
+          function makeUpgradeHandler(btn, plan_id, label) {
+            if (!btn) return;
+            btn.addEventListener('click', async () => {
+              btn.disabled = true;
+              btn.textContent = 'Redirecting…';
               const r = await api('/api/billing/create-checkout-session', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ plan_id: 'starter' }),
+                body: JSON.stringify({ plan_id }),
               });
               if (r.ok && r.body.url) {
                 window.location.href = r.body.url;
               } else {
                 setStatus(r.body?.error || 'Failed to start checkout');
-                upgradeStarterBtn.disabled = false;
-                upgradeStarterBtn.textContent = 'Upgrade to Starter ($49/mo)';
+                btn.disabled = false;
+                btn.textContent = label;
               }
             });
           }
 
-          if (upgradeProBtn) {
-            upgradeProBtn.addEventListener('click', async () => {
-              upgradeProBtn.disabled = true;
-              upgradeProBtn.textContent = 'Redirecting…';
-              const r = await api('/api/billing/create-checkout-session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ plan_id: 'pro' }),
-              });
-              if (r.ok && r.body.url) {
-                window.location.href = r.body.url;
-              } else {
-                setStatus(r.body?.error || 'Failed to start checkout');
-                upgradeProBtn.disabled = false;
-                upgradeProBtn.textContent = 'Upgrade to Pro ($99/mo)';
-              }
-            });
-          }
+          makeUpgradeHandler(upgradeStarterBtn, 'starter', 'Upgrade to Starter ($49/mo)');
+          makeUpgradeHandler(upgradeGrowthBtn, 'growth', 'Upgrade to Growth ($149/mo)');
+          makeUpgradeHandler(upgradeAgencyBtn, 'agency', 'Upgrade to Agency ($349/mo)');
 
           if (manageBillingBtn) {
             manageBillingBtn.addEventListener('click', async () => {

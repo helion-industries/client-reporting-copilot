@@ -48,6 +48,27 @@
         }
 
         localStorage.setItem('token', body.token);
+
+        // If a plan was passed in the URL, go straight to checkout
+        const params = new URLSearchParams(window.location.search);
+        const plan = params.get('plan');
+        if (plan && ['starter', 'growth', 'agency'].includes(plan)) {
+          status.textContent = 'Account created! Taking you to checkout…';
+          const checkoutRes = await fetch('/api/billing/create-checkout-session', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${body.token}`,
+            },
+            body: JSON.stringify({ plan_id: plan }),
+          });
+          const checkoutBody = await checkoutRes.json();
+          if (checkoutRes.ok && checkoutBody.url) {
+            window.location.href = checkoutBody.url;
+            return;
+          }
+        }
+
         window.location.href = '/dashboard.html';
       });
     </script>
