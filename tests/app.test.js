@@ -2,17 +2,27 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const request = require('supertest');
+const { ReportEngine, DEFAULT_REPORT_TEMPLATE, MAX_AI_ROWS } = require('../src/reportEngine');
 
 function setupApp(options = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-workspace-'));
   process.env.DB_PATH = path.join(tempDir, 'app.db');
   process.env.JWT_SECRET = 'test-secret';
 
+  if (options.apiKey === undefined) {
+    delete process.env.OPENAI_API_KEY;
+  } else {
+    process.env.OPENAI_API_KEY = options.apiKey;
+  }
+
+  process.env.OPENAI_MODEL = options.model || 'gpt-4o-mini';
+
   jest.resetModules();
   const { createApp } = require('../src/app');
   const app = createApp({
     fetch: options.fetch,
     uploadDir: path.join(tempDir, 'uploads'),
+    reportEngine: options.reportEngine,
   });
 
   return { app, tempDir };
@@ -36,6 +46,16 @@ async function registerAndCreateClient(app) {
     clientId: createClient.body.client.id,
     token: register.body.token,
   };
+}
+
+async function createImport(app, auth, clientId) {
+  const response = await request(app)
+    .post(`/api/clients/${clientId}/imports/csv`)
+    .set(auth)
+    .field('period', '2026-03')
+    .attach('file', Buffer.from('channel,clicks,conversions\nGoogle Ads,120,15\nMeta,95,9\n'), 'report.csv');
+
+  return response.body.import;
 }
 
 describe('auth endpoints', () => {
@@ -384,5 +404,158 @@ describe('data imports', () => {
     expect(afterDelete.status).toBe(200);
     expect(afterDelete.body.imports).toHaveLength(1);
     expect(afterDelete.body.imports[0].id).toBe(second.body.import.id);
+  });
+});
+
+describe('report engine', () => {
+  test('returns mock report sections when no API key is set', async () => {
+    const engine = new ReportEngine({ apiKey: null });
+    const report = await engine.generateReport({
+      client: { name: 'Acme Co' },
+      imported: {
+        row_count: 2,
+        column_headers: ['channel', 'clicks'],
+        raw_data: [
+          { channel: 'Google Ads', clicks: '120' },
+          { channel: 'Meta', clicks: '95' },
+        ],
+      },
+      period: '2026-03',
+      templateConfig: DEFAULT_REPORT_TEMPLATE,
+    });
+
+    expect(report.meta.used_mock).toBe(true);
+    expect(Object.keys(report.sections)).toEqual(DEFAULT_REPORT_TEMPLATE.sections.map((section) => section.key));
+    expect(report.sections.executive_summary.content).toContain('Mock executive summary');
+  });
+
+  test('uses separate OpenAI calls per section and limits rows to 50', async () => {
+    const create = jest.fn().mockImplementation(async ({ input }) => ({ output_text: input.includes('Section: Executive Summary') ? 'Summary output' : 'Section output' }));
+    const engine = new ReportEngine({
+      apiKey: 'test-key',
+      openai: { responses: { create } },
+      model: 'custom-model',
+    });
+
+    const rows = Array.from({ length: 55 }, (_, index) => ({ campaign: `Campaign ${index + 1}`, clicks: String(index + 1) }));
+    const report = await engine.generateReport({
+      client: { name: 'Acme Co' },
+      imported: {
+        row_count: rows.length,
+        column_headers: ['campaign', 'clicks'],
+        raw_data: rows,
+      },
+      period: '2026-03',
+      templateConfig: DEFAULT_REPORT_TEMPLATE,
+    });
+
+    expect(create).toHaveBeenCalledTimes(DEFAULT_REPORT_TEMPLATE.sections.length);
+    expect(create.mock.calls[0][0].model).toBe('custom-model');
+    expect(create.mock.calls[0][0].input).toContain(`first ${MAX_AI_ROWS} max`);
+    expect(create.mock.calls[0][0].input).toContain('Campaign 50');
+    expect(create.mock.calls[0][0].input).not.toContain('Campaign 55');
+    expect(report.meta.ai_row_count).toBe(MAX_AI_ROWS);
+  });
+});
+
+describe('report CRUD endpoints', () => {
+  test('generates a report with mock content, then lists, gets, updates, and deletes it', async () => {
+    const { app } = setupApp();
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+
+    const generateResponse = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({
+        import_id: imported.id,
+        period: '2026-03',
+      });
+
+    expect(generateResponse.status).toBe(201);
+    expect(generateResponse.body.meta.used_mock).toBe(true);
+    expect(generateResponse.body.report.status).toBe('generated');
+    expect(generateResponse.body.report.sections.executive_summary.content).toContain('Mock executive summary');
+
+    const reportId = generateResponse.body.report.id;
+
+    const listResponse = await request(app)
+      .get(`/api/clients/${clientId}/reports`)
+      .set(auth);
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.reports).toHaveLength(1);
+
+    const getResponse = await request(app)
+      .get(`/api/clients/${clientId}/reports/${reportId}`)
+      .set(auth);
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.report.id).toBe(reportId);
+
+    const updatedSections = {
+      ...getResponse.body.report.sections,
+      recommendations: {
+        ...getResponse.body.report.sections.recommendations,
+        content: '1. Tighten budget allocation.\n2. Double down on top-performing channels.',
+      },
+    };
+
+    const updateResponse = await request(app)
+      .put(`/api/clients/${clientId}/reports/${reportId}`)
+      .set(auth)
+      .send({
+        sections: updatedSections,
+        status: 'edited',
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.report.status).toBe('edited');
+    expect(updateResponse.body.report.sections.recommendations.content).toContain('Tighten budget allocation');
+
+    const deleteResponse = await request(app)
+      .delete(`/api/clients/${clientId}/reports/${reportId}`)
+      .set(auth);
+    expect(deleteResponse.status).toBe(204);
+
+    const afterDelete = await request(app)
+      .get(`/api/clients/${clientId}/reports`)
+      .set(auth);
+    expect(afterDelete.status).toBe(200);
+    expect(afterDelete.body.reports).toHaveLength(0);
+  });
+
+  test('uses injected OpenAI client and surfaces rate limit errors gracefully', async () => {
+    const create = jest.fn()
+      .mockResolvedValueOnce({ output_text: 'Summary' })
+      .mockRejectedValueOnce(Object.assign(new Error('Too many requests'), { status: 429 }));
+    const reportEngine = new ReportEngine({
+      apiKey: 'live-key',
+      openai: { responses: { create } },
+    });
+    const { app } = setupApp({ reportEngine, apiKey: 'live-key' });
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+
+    const response = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({
+        import_id: imported.id,
+        period: '2026-03',
+      });
+
+    expect(response.status).toBe(429);
+    expect(response.body.error).toBe('OpenAI rate limit exceeded');
+  });
+
+  test('returns the default report template', async () => {
+    const { app } = setupApp();
+    const { auth } = await registerAndCreateClient(app);
+
+    const response = await request(app)
+      .get('/api/report-template/default')
+      .set(auth);
+
+    expect(response.status).toBe(200);
+    expect(response.body.template_config.sections).toHaveLength(6);
   });
 });

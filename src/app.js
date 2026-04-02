@@ -8,6 +8,12 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createDatabase } = require('./db');
 const { authMiddleware, signToken } = require('./auth');
+const {
+  DEFAULT_REPORT_TEMPLATE,
+  ReportEngine,
+  ReportGenerationError,
+  normalizeTemplateConfig,
+} = require('./reportEngine');
 
 const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -112,14 +118,13 @@ function createApp(options = {}) {
   const fetchImpl = options.fetch || global.fetch;
   const uploadDir = options.uploadDir || path.join(os.tmpdir(), 'client-reporting-imports');
   const upload = createUploadMiddleware(uploadDir);
+  const reportEngine = options.reportEngine || new ReportEngine(options.reportEngineOptions);
 
   app.use(cors());
   app.use(express.json());
   app.use(express.static(path.resolve(__dirname, '..', 'public')));
 
-  const selectAgencyByEmail = db.prepare(
-    'SELECT * FROM agencies WHERE email = ?'
-  );
+  const selectAgencyByEmail = db.prepare('SELECT * FROM agencies WHERE email = ?');
   const selectAgencyById = db.prepare(
     'SELECT id, name, email, logo_url, brand_color, created_at FROM agencies WHERE id = ?'
   );
@@ -139,9 +144,7 @@ function createApp(options = {}) {
      WHERE agency_id = ? AND archived_at IS NULL
      ORDER BY id DESC`
   );
-  const selectClient = db.prepare(
-    'SELECT * FROM clients WHERE id = ? AND agency_id = ?'
-  );
+  const selectClient = db.prepare('SELECT * FROM clients WHERE id = ? AND agency_id = ?');
   const updateClient = db.prepare(
     'UPDATE clients SET name = ?, industry = ? WHERE id = ? AND agency_id = ?'
   );
@@ -179,6 +182,41 @@ function createApp(options = {}) {
      )`
   );
 
+  const insertReport = db.prepare(
+    `INSERT INTO reports (
+      client_id,
+      import_id,
+      period,
+      template_config_json,
+      sections_json,
+      status
+    ) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const listReports = db.prepare(
+    `SELECT r.*
+     FROM reports r
+     INNER JOIN clients c ON c.id = r.client_id
+     WHERE r.client_id = ? AND c.agency_id = ? AND c.archived_at IS NULL
+     ORDER BY r.created_at DESC, r.id DESC`
+  );
+  const selectReport = db.prepare(
+    `SELECT r.*, c.agency_id, c.archived_at
+     FROM reports r
+     INNER JOIN clients c ON c.id = r.client_id
+     WHERE r.id = ? AND r.client_id = ? AND c.agency_id = ?`
+  );
+  const updateReport = db.prepare(
+    `UPDATE reports
+     SET period = ?, template_config_json = ?, sections_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND client_id = ?`
+  );
+  const deleteReport = db.prepare(
+    `DELETE FROM reports
+     WHERE id = ? AND client_id = ? AND client_id IN (
+       SELECT id FROM clients WHERE agency_id = ? AND archived_at IS NULL
+     )`
+  );
+
   function sanitizeAgency(row) {
     if (!row) return null;
     return {
@@ -209,6 +247,22 @@ function createApp(options = {}) {
     }
 
     return base;
+  }
+
+  function serializeReport(row) {
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      client_id: row.client_id,
+      import_id: row.import_id,
+      period: row.period,
+      template_config: JSON.parse(row.template_config_json || '{}'),
+      sections: JSON.parse(row.sections_json || '{}'),
+      status: row.status,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
   }
 
   function requireActiveClient(clientId, agencyId) {
@@ -479,6 +533,140 @@ function createApp(options = {}) {
     }
 
     return res.status(204).send();
+  });
+
+  app.post('/api/clients/:id/reports/generate', authMiddleware, async (req, res) => {
+    const clientId = Number(req.params.id);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const importId = Number(req.body?.import_id);
+    const period = String(req.body?.period || '').trim();
+
+    if (!importId || !period) {
+      return res.status(400).json({ error: 'import_id and period are required' });
+    }
+
+    const importedRow = selectImport.get(importId, clientId, req.auth.sub);
+    if (!importedRow || importedRow.archived_at) {
+      return res.status(404).json({ error: 'Import not found' });
+    }
+
+    const imported = serializeImport(importedRow, { includeData: true });
+    const templateConfig = normalizeTemplateConfig(req.body?.template_config);
+
+    try {
+      const generated = await reportEngine.generateReport({
+        client,
+        imported,
+        period,
+        templateConfig,
+      });
+
+      const result = insertReport.run(
+        clientId,
+        importId,
+        period,
+        JSON.stringify(generated.template_config),
+        JSON.stringify(generated.sections),
+        'generated'
+      );
+
+      const created = selectReport.get(result.lastInsertRowid, clientId, req.auth.sub);
+      return res.status(201).json({ report: serializeReport(created), meta: generated.meta });
+    } catch (error) {
+      if (error instanceof ReportGenerationError || error?.name === 'ReportGenerationError' || error?.statusCode) {
+        return res.status(error.statusCode || 502).json({ error: error.message });
+      }
+      return res.status(500).json({ error: 'Failed to generate report' });
+    }
+  });
+
+  app.get('/api/clients/:id/reports', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const reports = listReports.all(clientId, req.auth.sub).map((row) => serializeReport(row));
+    return res.json({ reports });
+  });
+
+  app.get('/api/clients/:id/reports/:reportId', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const report = selectReport.get(reportId, clientId, req.auth.sub);
+    if (!report || report.archived_at) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    return res.json({ report: serializeReport(report) });
+  });
+
+  app.put('/api/clients/:id/reports/:reportId', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const existing = selectReport.get(reportId, clientId, req.auth.sub);
+    if (!existing || existing.archived_at) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const period = req.body?.period ? String(req.body.period).trim() : existing.period;
+    const templateConfig = req.body?.template_config
+      ? normalizeTemplateConfig(req.body.template_config)
+      : JSON.parse(existing.template_config_json || '{}');
+    const sections = req.body?.sections || JSON.parse(existing.sections_json || '{}');
+    const status = req.body?.status ? String(req.body.status).trim() : 'edited';
+
+    updateReport.run(
+      period,
+      JSON.stringify(templateConfig),
+      JSON.stringify(sections),
+      status || 'edited',
+      reportId,
+      clientId
+    );
+
+    const updated = selectReport.get(reportId, clientId, req.auth.sub);
+    return res.json({ report: serializeReport(updated) });
+  });
+
+  app.delete('/api/clients/:id/reports/:reportId', authMiddleware, (req, res) => {
+    const clientId = Number(req.params.id);
+    const reportId = Number(req.params.reportId);
+    const client = requireActiveClient(clientId, req.auth.sub);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const result = deleteReport.run(reportId, clientId, req.auth.sub);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    return res.status(204).send();
+  });
+
+  app.get('/api/report-template/default', authMiddleware, (_req, res) => {
+    return res.json({ template_config: DEFAULT_REPORT_TEMPLATE });
   });
 
   app.get('/health', (_req, res) => {

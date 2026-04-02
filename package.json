@@ -27,7 +27,8 @@
     "csv-parse": "^6.2.1",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.1.1"
+    "multer": "^2.1.1",
+    "openai": "^6.33.0"
   },
   "devDependencies": {
     "jest": "^30.3.0",

@@ -12,14 +12,18 @@
         padding: 1rem;
         margin-bottom: 1rem;
       }
-      .client-card h3 {
+      .client-card h3,
+      .client-card h4,
+      .client-card h5 {
         margin: 0 0 0.5rem;
       }
-      .import-list {
+      .import-list,
+      .report-list {
         margin-top: 0.75rem;
         padding-left: 1rem;
       }
-      .import-actions {
+      .import-actions,
+      .report-actions {
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
@@ -29,6 +33,16 @@
         display: grid;
         gap: 0.5rem;
         margin-top: 0.75rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 120px;
+      }
+      .report-section {
+        margin-top: 0.75rem;
+        padding: 0.75rem;
+        border: 1px solid #eee;
+        border-radius: 8px;
       }
     </style>
   </head>
@@ -72,6 +86,13 @@
         return { ok: response.ok, status: response.status, body };
       }
 
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;');
+      }
+
       function renderImports(client, imports) {
         if (!imports.length) {
           return '<p>No imports yet.</p>';
@@ -88,6 +109,7 @@
                     — ${item.row_count} rows
                     <div class="import-actions">
                       <button type="button" data-action="view-import" data-client-id="${client.id}" data-import-id="${item.id}">View</button>
+                      <button type="button" data-action="generate-report" data-client-id="${client.id}" data-import-id="${item.id}" data-period="${item.period}">Generate report</button>
                       <button type="button" data-action="delete-import" data-client-id="${client.id}" data-import-id="${item.id}">Delete</button>
                     </div>
                   </li>
@@ -95,6 +117,55 @@
               )
               .join('')}
           </ul>
+        `;
+      }
+
+      function renderReports(client, reports) {
+        if (!reports.length) {
+          return '<p>No reports yet.</p>';
+        }
+
+        return `
+          <ul class="report-list">
+            ${reports
+              .map(
+                (item) => `
+                  <li>
+                    <strong>${item.period}</strong>
+                    — status: ${item.status}
+                    <div class="report-actions">
+                      <button type="button" data-action="view-report" data-client-id="${client.id}" data-report-id="${item.id}">View</button>
+                      <button type="button" data-action="delete-report" data-client-id="${client.id}" data-report-id="${item.id}">Delete</button>
+                    </div>
+                  </li>
+                `
+              )
+              .join('')}
+          </ul>
+        `;
+      }
+
+      function renderReportEditor(report) {
+        const sections = Object.entries(report.sections || {})
+          .map(
+            ([key, section]) => `
+              <div class="report-section">
+                <h5>${escapeHtml(section.title || key)}</h5>
+                <textarea data-section-key="${key}">${escapeHtml(section.content || '')}</textarea>
+              </div>
+            `
+          )
+          .join('');
+
+        return `
+          <div>
+            <h3>Report #${report.id} — ${escapeHtml(report.period)}</h3>
+            <p>Status: ${escapeHtml(report.status)}</p>
+            ${sections}
+            <div class="report-actions">
+              <button type="button" data-action="save-report" data-client-id="${report.client_id}" data-report-id="${report.id}">Save edits</button>
+            </div>
+          </div>
         `;
       }
 
@@ -109,8 +180,12 @@
         list.innerHTML = '';
 
         for (const client of result.body.clients) {
-          const importsResult = await api(`/api/clients/${client.id}/imports`);
+          const [importsResult, reportsResult] = await Promise.all([
+            api(`/api/clients/${client.id}/imports`),
+            api(`/api/clients/${client.id}/reports`),
+          ]);
           const imports = importsResult.ok ? importsResult.body.imports : [];
+          const reports = reportsResult.ok ? reportsResult.body.reports : [];
 
           const item = document.createElement('section');
           item.className = 'client-card';
@@ -131,6 +206,9 @@
             </div>
             <h4>Imports</h4>
             ${renderImports(client, imports)}
+            <h4>Reports</h4>
+            ${renderReports(client, reports)}
+            <div class="report-viewer"></div>
           `;
           list.appendChild(item);
         }
@@ -211,15 +289,83 @@
 
         const clientId = button.dataset.clientId;
         const importId = button.dataset.importId;
+        const reportId = button.dataset.reportId;
+        const clientCard = button.closest('.client-card');
+        const reportViewer = clientCard ? clientCard.querySelector('.report-viewer') : null;
 
         if (button.dataset.action === 'view-import') {
           const result = await api(`/api/clients/${clientId}/imports/${importId}`);
+          status.textContent = result.ok
+            ? JSON.stringify(result.body.import, null, 2)
+            : result.body.error || 'Failed to load import';
+        }
+
+        if (button.dataset.action === 'generate-report') {
+          const result = await api(`/api/clients/${clientId}/reports/generate`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              import_id: Number(importId),
+              period: button.dataset.period,
+            }),
+          });
+
           if (!result.ok) {
-            status.textContent = result.body.error || 'Failed to load import';
+            status.textContent = result.body.error || 'Failed to generate report';
             return;
           }
 
-          status.textContent = JSON.stringify(result.body.import, null, 2);
+          status.textContent = `Report generated with status ${result.body.report.status}`;
+          if (reportViewer) {
+            reportViewer.innerHTML = renderReportEditor(result.body.report);
+          }
+          await loadClients();
+        }
+
+        if (button.dataset.action === 'view-report') {
+          const result = await api(`/api/clients/${clientId}/reports/${reportId}`);
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to load report';
+            return;
+          }
+
+          if (reportViewer) {
+            reportViewer.innerHTML = renderReportEditor(result.body.report);
+          }
+          status.textContent = `Loaded report ${reportId}`;
+        }
+
+        if (button.dataset.action === 'save-report') {
+          const sections = {};
+          for (const textarea of reportViewer.querySelectorAll('textarea[data-section-key]')) {
+            const key = textarea.dataset.sectionKey;
+            const sectionEl = textarea.closest('.report-section');
+            sections[key] = {
+              title: sectionEl ? sectionEl.querySelector('h5').textContent : key,
+              content: textarea.value,
+            };
+          }
+
+          const result = await api(`/api/clients/${clientId}/reports/${reportId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ sections, status: 'edited' }),
+          });
+
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to save report';
+            return;
+          }
+
+          status.textContent = `Saved report ${reportId}`;
+          if (reportViewer) {
+            reportViewer.innerHTML = renderReportEditor(result.body.report);
+          }
+          await loadClients();
         }
 
         if (button.dataset.action === 'delete-import') {
@@ -233,6 +379,23 @@
           }
 
           status.textContent = 'Import deleted';
+          await loadClients();
+        }
+
+        if (button.dataset.action === 'delete-report') {
+          const result = await api(`/api/clients/${clientId}/reports/${reportId}`, {
+            method: 'DELETE',
+          });
+
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to delete report';
+            return;
+          }
+
+          if (reportViewer) {
+            reportViewer.innerHTML = '';
+          }
+          status.textContent = 'Report deleted';
           await loadClients();
         }
       });
