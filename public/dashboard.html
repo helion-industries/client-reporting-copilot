@@ -69,14 +69,18 @@
         window.location.href = '/login.html';
       }
 
-      async function api(path, options = {}) {
-        const response = await fetch(path, {
+      async function authFetch(path, options = {}) {
+        return fetch(path, {
           ...options,
           headers: {
             Authorization: `Bearer ${token}`,
             ...(options.headers || {}),
           },
         });
+      }
+
+      async function api(path, options = {}) {
+        const response = await authFetch(path, options);
 
         if (response.status === 204) {
           return { ok: true, status: response.status, body: null };
@@ -135,6 +139,10 @@
                     — status: ${item.status}
                     <div class="report-actions">
                       <button type="button" data-action="view-report" data-client-id="${client.id}" data-report-id="${item.id}">View</button>
+                      <button type="button" data-action="preview-report" data-client-id="${client.id}" data-report-id="${item.id}">Preview</button>
+                      <button type="button" data-action="download-pdf" data-client-id="${client.id}" data-report-id="${item.id}">Download PDF</button>
+                      <button type="button" data-action="create-share-link" data-client-id="${client.id}" data-report-id="${item.id}">Create share link</button>
+                      <button type="button" data-action="generate-email-draft" data-client-id="${client.id}" data-report-id="${item.id}">Generate email draft</button>
                       <button type="button" data-action="delete-report" data-client-id="${client.id}" data-report-id="${item.id}">Delete</button>
                     </div>
                   </li>
@@ -164,6 +172,16 @@
             ${sections}
             <div class="report-actions">
               <button type="button" data-action="save-report" data-client-id="${report.client_id}" data-report-id="${report.id}">Save edits</button>
+            </div>
+            <div class="stack export-tools">
+              <label>
+                Share link
+                <textarea data-output="share-link" readonly placeholder="Create a share link to display it here."></textarea>
+              </label>
+              <label>
+                Email draft
+                <textarea data-output="email-draft" readonly placeholder="Generate an email draft to display it here."></textarea>
+              </label>
             </div>
           </div>
         `;
@@ -335,6 +353,97 @@
             reportViewer.innerHTML = renderReportEditor(result.body.report);
           }
           status.textContent = `Loaded report ${reportId}`;
+        }
+
+        if (button.dataset.action === 'preview-report') {
+          const response = await authFetch(`/api/clients/${clientId}/reports/${reportId}/preview`);
+          if (!response.ok) {
+            const body = await response.json();
+            status.textContent = body.error || 'Failed to load preview';
+            return;
+          }
+
+          const html = await response.text();
+          const previewWindow = window.open('', '_blank', 'noopener');
+          if (previewWindow) {
+            previewWindow.document.open();
+            previewWindow.document.write(html);
+            previewWindow.document.close();
+          }
+          status.textContent = `Opened preview for report ${reportId}`;
+        }
+
+        if (button.dataset.action === 'download-pdf') {
+          const response = await authFetch(`/api/clients/${clientId}/reports/${reportId}/pdf`);
+          if (!response.ok) {
+            const body = await response.json();
+            status.textContent = body.error || 'Failed to download PDF';
+            return;
+          }
+
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `report-${reportId}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+          status.textContent = `Started PDF download for report ${reportId}`;
+        }
+
+        if (button.dataset.action === 'create-share-link') {
+          if (reportViewer && !reportViewer.querySelector('[data-output="share-link"]')) {
+            const reportResult = await api(`/api/clients/${clientId}/reports/${reportId}`);
+            if (reportResult.ok) {
+              reportViewer.innerHTML = renderReportEditor(reportResult.body.report);
+            }
+          }
+
+          const result = await api(`/api/clients/${clientId}/reports/${reportId}/share`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+          });
+
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to create share link';
+            return;
+          }
+
+          const output = reportViewer ? reportViewer.querySelector('[data-output="share-link"]') : null;
+          if (output) {
+            output.value = result.body.share_link.url;
+          }
+          status.textContent = 'Share link created';
+        }
+
+        if (button.dataset.action === 'generate-email-draft') {
+          if (reportViewer && !reportViewer.querySelector('[data-output="email-draft"]')) {
+            const reportResult = await api(`/api/clients/${clientId}/reports/${reportId}`);
+            if (reportResult.ok) {
+              reportViewer.innerHTML = renderReportEditor(reportResult.body.report);
+            }
+          }
+
+          const result = await api(`/api/clients/${clientId}/reports/${reportId}/email-draft`);
+          if (!result.ok) {
+            status.textContent = result.body.error || 'Failed to generate email draft';
+            return;
+          }
+
+          const emailOutput = reportViewer ? reportViewer.querySelector('[data-output="email-draft"]') : null;
+          const shareOutput = reportViewer ? reportViewer.querySelector('[data-output="share-link"]') : null;
+          if (emailOutput) {
+            emailOutput.value = result.body.email_draft.body;
+          }
+          if (shareOutput) {
+            shareOutput.value = result.body.email_draft.share_url;
+          }
+          status.textContent = 'Email draft generated';
         }
 
         if (button.dataset.action === 'save-report') {

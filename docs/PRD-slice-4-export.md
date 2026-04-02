@@ -14,53 +14,51 @@ Let agencies preview generated reports in a branded format, export as PDF, creat
 - Existing agency branding (logo_url, brand_color from agency profile)
 
 ## Tasks
-- [ ] Create database schema: share_links table (id, report_id, token, expires_at, created_at)
-- [ ] Install dependencies: puppeteer
-- [ ] Build GET /api/clients/:id/reports/:reportId/preview endpoint (returns branded HTML report page)
-- [ ] Build the branded report HTML template:
-  - [ ] Agency logo and name at top
-  - [ ] Agency brand color as accent
-  - [ ] Client name and report period
-  - [ ] Each section rendered with clear headings
-  - [ ] Clean, professional styling suitable for client viewing
-- [ ] Build GET /api/clients/:id/reports/:reportId/pdf endpoint (renders preview HTML via Puppeteer, returns PDF)
-- [ ] Build POST /api/clients/:id/reports/:reportId/share endpoint:
-  - [ ] Generates a unique token (crypto.randomUUID or randomBytes)
-  - [ ] Stores in share_links with configurable expiry (default 30 days)
-  - [ ] Returns the shareable URL
-- [ ] Build GET /api/shared/:token endpoint (public, no auth required):
-  - [ ] Looks up share link by token
-  - [ ] Checks expiry
-  - [ ] Renders the branded report HTML (same as preview)
-  - [ ] Returns 404 if expired or invalid
-- [ ] Build GET /api/clients/:id/reports/:reportId/email-draft endpoint:
-  - [ ] Returns a plain text email body with:
-  - [ ] Subject line suggestion
-  - [ ] Executive summary included
-  - [ ] Link to full report (share link)
-  - [ ] Professional sign-off
-- [ ] Update dashboard with:
-  - [ ] Preview button (opens report in new tab)
-  - [ ] Download PDF button
-  - [ ] Create share link button (shows URL)
-  - [ ] Generate email draft button (shows copyable text)
-- [ ] Write tests for PDF endpoint (mock Puppeteer, verify response type)
-- [ ] Write tests for share link creation and retrieval (valid token, expired token, invalid token)
-- [ ] Write tests for email draft endpoint
-- [ ] Run full test suite — all 21+ tests pass
+- [x] Create database schema: share_links table (id, report_id, token, expires_at, created_at)
+- [x] Install dependencies: puppeteer
+- [x] Build GET /api/clients/:id/reports/:reportId/preview endpoint (returns branded HTML report page)
+- [x] Build the branded report HTML template:
+  - [x] Agency logo and name at top
+  - [x] Agency brand color as accent
+  - [x] Client name and report period
+  - [x] Each section rendered with clear headings
+  - [x] Clean, professional styling suitable for client viewing
+- [x] Build GET /api/clients/:id/reports/:reportId/pdf endpoint (renders preview HTML via Puppeteer, returns PDF)
+- [x] Build POST /api/clients/:id/reports/:reportId/share endpoint:
+  - [x] Generates a unique token (crypto.randomUUID or randomBytes)
+  - [x] Stores in share_links with configurable expiry (default 30 days)
+  - [x] Returns the shareable URL
+- [x] Build GET /api/shared/:token endpoint (public, no auth required):
+  - [x] Looks up share link by token
+  - [x] Checks expiry
+  - [x] Renders the branded report HTML (same as preview)
+  - [x] Returns 404 if expired or invalid
+- [x] Build GET /api/clients/:id/reports/:reportId/email-draft endpoint:
+  - [x] Returns a plain text email body with:
+  - [x] Subject line suggestion
+  - [x] Executive summary included
+  - [x] Link to full report (share link)
+  - [x] Professional sign-off
+- [x] Update dashboard with:
+  - [x] Preview button (opens report in new tab)
+  - [x] Download PDF button
+  - [x] Create share link button (shows URL)
+  - [x] Generate email draft button (shows copyable text)
+- [x] Write tests for PDF endpoint (mock Puppeteer, verify response type)
+- [x] Write tests for share link creation and retrieval (valid token, expired token, invalid token)
+- [x] Write tests for email draft endpoint
+- [x] Run full test suite — all 21+ tests pass
 
 ## Acceptance Criteria
-- [ ] Agency can preview a branded report in the browser
-- [ ] Agency can download the report as a PDF
-- [ ] Agency can create a shareable link with expiry
-- [ ] Shared link works without authentication
-- [ ] Expired/invalid share links return 404
-- [ ] Agency can generate an email draft with summary and share link
-- [ ] All previous tests still pass
+- [x] Agency can preview a branded report in the browser
+- [x] Agency can download the report as a PDF
+- [x] Agency can create a shareable link with expiry
+- [x] Shared link works without authentication
+- [x] Expired/invalid share links return 404
+- [x] Agency can generate an email draft with summary and share link
+- [x] All previous tests still pass
 
 ## Completion Marker
-When everything is truly complete, replace this line with:
-
 ALL TASKS COMPLETE
 
 ## Notes for the coding agent

@@ -2,6 +2,23 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const request = require('supertest');
+
+const mockPdf = jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 test pdf'));
+const mockSetContent = jest.fn().mockResolvedValue(undefined);
+const mockNewPage = jest.fn().mockResolvedValue({
+  setContent: mockSetContent,
+  pdf: mockPdf,
+});
+const mockClose = jest.fn().mockResolvedValue(undefined);
+const mockLaunch = jest.fn().mockResolvedValue({
+  newPage: mockNewPage,
+  close: mockClose,
+});
+
+jest.mock('puppeteer', () => ({
+  launch: mockLaunch,
+}));
+
 const { ReportEngine, DEFAULT_REPORT_TEMPLATE, MAX_AI_ROWS } = require('../src/reportEngine');
 
 function setupApp(options = {}) {
@@ -23,6 +40,7 @@ function setupApp(options = {}) {
     fetch: options.fetch,
     uploadDir: path.join(tempDir, 'uploads'),
     reportEngine: options.reportEngine,
+    appBaseUrl: options.appBaseUrl,
   });
 
   return { app, tempDir };
@@ -557,5 +575,158 @@ describe('report CRUD endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.template_config.sections).toHaveLength(6);
+  });
+});
+
+
+describe('report export and sharing endpoints', () => {
+  beforeEach(() => {
+    mockLaunch.mockClear();
+    mockNewPage.mockClear();
+    mockSetContent.mockClear();
+    mockPdf.mockClear();
+    mockClose.mockClear();
+    mockPdf.mockResolvedValue(Buffer.from('%PDF-1.4 test pdf'));
+  });
+
+  test('renders a branded report preview as HTML', async () => {
+    const { app } = setupApp({ appBaseUrl: 'https://reports.example.com' });
+    const { auth, clientId } = await registerAndCreateClient(app);
+    await request(app)
+      .put('/api/agency')
+      .set(auth)
+      .send({
+        name: 'Northstar Creative',
+        logo_url: 'https://example.com/logo.png',
+        brand_color: '#ff6600',
+      });
+    const imported = await createImport(app, auth, clientId);
+    const generated = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({ import_id: imported.id, period: '2026-03' });
+
+    const response = await request(app)
+      .get(`/api/clients/${clientId}/reports/${generated.body.report.id}/preview`)
+      .set(auth);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.text).toContain('Northstar Creative');
+    expect(response.text).toContain('https://example.com/logo.png');
+    expect(response.text).toContain('#ff6600');
+    expect(response.text).toContain('Acme Co — Performance Report');
+  });
+
+  test('renders a PDF with mocked puppeteer', async () => {
+    const { app } = setupApp();
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+    const generated = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({ import_id: imported.id, period: '2026-03' });
+
+    const response = await request(app)
+      .get(`/api/clients/${clientId}/reports/${generated.body.report.id}/pdf`)
+      .set(auth);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('application/pdf');
+    expect(mockLaunch).toHaveBeenCalledWith({ headless: true, args: ['--no-sandbox'] });
+    expect(mockSetContent).toHaveBeenCalledWith(expect.stringContaining('Acme Co'), { waitUntil: 'networkidle0' });
+    expect(mockPdf).toHaveBeenCalled();
+    expect(mockClose).toHaveBeenCalled();
+  });
+
+  test('creates and retrieves a valid share link publicly', async () => {
+    const { app } = setupApp({ appBaseUrl: 'https://reports.example.com' });
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+    const generated = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({ import_id: imported.id, period: '2026-03' });
+
+    const shareResponse = await request(app)
+      .post(`/api/clients/${clientId}/reports/${generated.body.report.id}/share`)
+      .set(auth)
+      .send({ expires_in_days: 30 });
+
+    expect(shareResponse.status).toBe(201);
+    expect(shareResponse.body.share_link.token).toMatch(/^[a-f0-9]{48}$/);
+    expect(shareResponse.body.share_link.url).toContain('/api/shared/');
+
+    const publicResponse = await request(app)
+      .get(`/api/shared/${shareResponse.body.share_link.token}`);
+
+    expect(publicResponse.status).toBe(200);
+    expect(publicResponse.headers['content-type']).toContain('text/html');
+    expect(publicResponse.text).toContain('Shared client view');
+    expect(publicResponse.text).toContain('Acme Co');
+  });
+
+  test('returns 404 for expired and invalid share links', async () => {
+    const { app } = setupApp();
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+    const generated = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({ import_id: imported.id, period: '2026-03' });
+
+    const shareResponse = await request(app)
+      .post(`/api/clients/${clientId}/reports/${generated.body.report.id}/share`)
+      .set(auth)
+      .send({ expires_in_days: 30 });
+
+    app.locals.db.prepare('UPDATE share_links SET expires_at = ? WHERE token = ?').run(
+      new Date(Date.now() - 60_000).toISOString(),
+      shareResponse.body.share_link.token
+    );
+
+    const expiredResponse = await request(app)
+      .get(`/api/shared/${shareResponse.body.share_link.token}`);
+    const invalidResponse = await request(app)
+      .get('/api/shared/not-a-real-token');
+
+    expect(expiredResponse.status).toBe(404);
+    expect(invalidResponse.status).toBe(404);
+  });
+
+  test('builds an email draft with executive summary and share link', async () => {
+    const { app } = setupApp({ appBaseUrl: 'https://reports.example.com' });
+    const { auth, clientId } = await registerAndCreateClient(app);
+    const imported = await createImport(app, auth, clientId);
+    const generated = await request(app)
+      .post(`/api/clients/${clientId}/reports/generate`)
+      .set(auth)
+      .send({ import_id: imported.id, period: '2026-03' });
+
+    const response = await request(app)
+      .get(`/api/clients/${clientId}/reports/${generated.body.report.id}/email-draft`)
+      .set(auth);
+
+    expect(response.status).toBe(200);
+    expect(response.body.email_draft.subject).toBe('Acme Co 2026-03 performance report');
+    expect(response.body.email_draft.body).toContain('Executive summary:');
+    expect(response.body.email_draft.body).toContain('Mock executive summary');
+    expect(response.body.email_draft.body).toContain('https://reports.example.com/api/shared/');
+    expect(response.body.email_draft.share_url).toContain('https://reports.example.com/api/shared/');
+  });
+
+  test('requires auth for preview, pdf, share, and email draft endpoints', async () => {
+    const { app } = setupApp();
+    const responseStatuses = await Promise.all([
+      request(app).get('/api/clients/1/reports/1/preview'),
+      request(app).get('/api/clients/1/reports/1/pdf'),
+      request(app).post('/api/clients/1/reports/1/share').send({}),
+      request(app).get('/api/clients/1/reports/1/email-draft'),
+    ]);
+
+    responseStatuses.forEach((response) => {
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('Authentication required');
+    });
   });
 });

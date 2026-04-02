@@ -66,6 +66,15 @@ function createDatabase() {
       FOREIGN KEY (client_id) REFERENCES clients(id),
       FOREIGN KEY (import_id) REFERENCES data_imports(id)
     );
+
+    CREATE TABLE IF NOT EXISTS share_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (report_id) REFERENCES reports(id)
+    );
   `);
 
   return db;
