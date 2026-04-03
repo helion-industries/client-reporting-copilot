@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pricing — Client Reporting Copilot</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* ── Pricing page overrides ── */
+    body { background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); }
+
+    .pricing-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    .pricing-nav-brand {
+      font-size: 18px;
+      font-weight: 800;
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .pricing-nav-links { display: flex; gap: 8px; }
+
+    .pricing-hero {
+      text-align: center;
+      padding: 56px 24px 40px;
+    }
+    .pricing-hero h1 {
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      margin: 0 0 12px;
+      color: #111827;
+    }
+    .pricing-hero p { color: #6b7280; font-size: 18px; max-width: 500px; margin: 0 auto; }
+
+    .pricing-wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    /* Standard plans row */
+    .plans-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .plan-card {
+      background: #fff;
+      border: 1px solid #dbe3ee;
+      border-radius: 16px;
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 4px 20px rgba(15,23,42,0.06);
+    }
+    .plan-card.featured {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 2px #2563eb, 0 8px 30px rgba(37,99,235,0.15);
+    }
+    .plan-badge {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 999px;
+      margin-bottom: 14px;
+      align-self: flex-start;
+    }
+    .plan-name { font-size: 20px; font-weight: 800; color: #111827; margin-bottom: 6px; }
+    .plan-price { font-size: 42px; font-weight: 900; color: #111827; line-height: 1; }
+    .plan-price span { font-size: 20px; font-weight: 600; vertical-align: top; line-height: 1.6; }
+    .plan-period { color: #6b7280; font-size: 14px; margin: 4px 0 20px; }
+    .plan-features { list-style: none; padding: 0; margin: 0 0 24px; flex: 1; }
+    .plan-features li { padding: 7px 0; color: #374151; font-size: 14px; border-bottom: 1px solid #f3f4f6; }
+    .plan-features li:last-child { border-bottom: none; }
+    .plan-features li::before { content: "✓ "; color: #059669; font-weight: 700; }
+
+    .plan-btn {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      transition: 0.15s;
+      text-decoration: none;
+    }
+    .plan-btn-primary { background: #2563eb; color: #fff; }
+    .plan-btn-primary:hover { background: #1d4ed8; }
+    .plan-btn-secondary { background: #f1f5f9; color: #374151; border: 1px solid #dbe3ee; }
+    .plan-btn-secondary:hover { background: #e2e8f0; }
+
+    /* ── Agency Suite banner ── */
+    .suite-section {
+      background: #0F0F0F;
+      border-radius: 20px;
+      padding: 40px 36px;
+      margin-top: 12px;
+    }
+    .suite-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(249,115,22,0.15);
+      color: #F97316;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(249,115,22,0.3);
+      margin-bottom: 16px;
+    }
+    .suite-heading {
+      font-size: clamp(24px, 3vw, 32px);
+      font-weight: 900;
+      color: #f0f0f0;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+    .suite-subhead {
+      color: #888;
+      font-size: 15px;
+      margin: 0 0 32px;
+      max-width: 560px;
+    }
+    .suite-subhead strong { color: #F97316; }
+    .suite-subhead a { color: #F97316; text-decoration: none; }
+    .suite-subhead a:hover { text-decoration: underline; }
+
+    .suite-plans {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .suite-card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.15s;
+    }
+    .suite-card:hover { border-color: #F97316; }
+    .suite-card.suite-featured {
+      border-color: #F97316;
+      box-shadow: 0 0 0 1px #F97316, 0 8px 24px rgba(249,115,22,0.15);
+    }
+    .suite-card-badge {
+      display: inline-block;
+      background: rgba(249,115,22,0.2);
+      color: #F97316;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+      align-self: flex-start;
+    }
+    .suite-plan-name { font-size: 17px; font-weight: 800; color: #f0f0f0; margin-bottom: 4px; }
+    .suite-plan-price { font-size: 38px; font-weight: 900; color: #F97316; line-height: 1; }
+    .suite-plan-price span { font-size: 18px; font-weight: 600; vertical-align: top; line-height: 1.6; color: #F97316; }
+    .suite-plan-period { color: #888; font-size: 13px; margin: 4px 0 6px; }
+    .suite-savings {
+      display: inline-block;
+      background: rgba(34,197,94,0.15);
+      color: #4ade80;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+    }
+    .suite-features { list-style: none; padding: 0; margin: 0 0 20px; flex: 1; }
+    .suite-features li { padding: 6px 0; color: #d1d5db; font-size: 13px; border-bottom: 1px solid #2a2a2a; }
+    .suite-features li:last-child { border-bottom: none; }
+    .suite-features li::before { content: "✓ "; color: #F97316; font-weight: 700; }
+
+    .suite-btn {
+      display: block;
+      width: 100%;
+      padding: 11px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      transition: 0.15s;
+      text-decoration: none;
+    }
+    .suite-btn-primary { background: #F97316; color: #fff; }
+    .suite-btn-primary:hover { background: #ea6d10; }
+    .suite-btn-secondary { background: #222; color: #f0f0f0; border: 1px solid #333; }
+    .suite-btn-secondary:hover { background: #2a2a2a; }
+
+    .pricing-footer { text-align: center; color: #9ca3af; font-size: 13px; margin-top: 32px; }
+
+    #toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .toast-msg {
+      padding: 12px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
+      color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      animation: slideIn 0.2s ease;
+    }
+    .toast-success { background: #059669; }
+    .toast-error { background: #dc2626; }
+    @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    @media (max-width: 768px) {
+      .plans-row, .suite-plans { grid-template-columns: 1fr; }
+      .suite-section { padding: 28px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="pricing-nav">
+    <a href="/" class="pricing-nav-brand">📊 Client Reporting Copilot</a>
+    <div class="pricing-nav-links">
+      <a href="/login.html" class="button-link button-link-secondary" style="min-height:38px;padding:0.5rem 1rem;font-size:14px;">Log in</a>
+      <a href="/register.html" class="button-link" style="min-height:38px;padding:0.5rem 1rem;font-size:14px;">Get Started</a>
+    </div>
+  </nav>
+
+  <div class="pricing-hero">
+    <h1>Simple, transparent pricing</h1>
+    <p>Start free. Upgrade when you need more. Cancel anytime.</p>
+  </div>
+
+  <div class="pricing-wrap">
+    <!-- Standard Plans -->
+    <div class="plans-row">
+      <div class="plan-card">
+        <div class="plan-name">Starter</div>
+        <div class="plan-price"><span>$</span>49</div>
+        <div class="plan-period">/month · 14-day free trial</div>
+        <ul class="plan-features">
+          <li>3 clients</li>
+          <li>Unlimited reports</li>
+          <li>Branded PDF output</li>
+          <li>Share links</li>
+          <li>Google Sheets import</li>
+        </ul>
+        <button class="plan-btn plan-btn-secondary" onclick="subscribe('starter')">Start Trial</button>
+      </div>
+
+      <div class="plan-card featured">
+        <div class="plan-badge">Most Popular</div>
+        <div class="plan-name">Growth</div>
+        <div class="plan-price"><span>$</span>149</div>
+        <div class="plan-period">/month · 14-day free trial</div>
+        <ul class="plan-features">
+          <li>15 clients</li>
+          <li>Unlimited reports</li>
+          <li>Branded PDF output</li>
+          <li>Share links</li>
+          <li>Custom branding</li>
+          <li>Priority support</li>
+        </ul>
+        <button class="plan-btn plan-btn-primary" onclick="subscribe('growth')">Start Trial</button>
+      </div>
+
+      <div class="plan-card">
+        <div class="plan-name">Agency</div>
+        <div class="plan-price"><span>$</span>349</div>
+        <div class="plan-period">/month · 14-day free trial</div>
+        <ul class="plan-features">
+          <li>Unlimited clients</li>
+          <li>Unlimited reports</li>
+          <li>Branded PDF output</li>
+          <li>White-label exports</li>
+          <li>Custom branding</li>
+          <li>Priority support</li>
+        </ul>
+        <button class="plan-btn plan-btn-secondary" onclick="subscribe('agency')">Start Trial</button>
+      </div>
+    </div>
+
+    <!-- Agency Suite Bundle -->
+    <div class="suite-section">
+      <div class="suite-label">🔥 Bundle Deal</div>
+      <h2 class="suite-heading">Agency Suite — Both Apps, One Price</h2>
+      <p class="suite-subhead">
+        Get <strong>Client Reporting Copilot + SOW Copilot</strong> together and save up to <strong>$149/mo</strong> vs buying separately.
+        SOW Copilot lives at <a href="https://sow.helionforge.com" target="_blank" rel="noopener">sow.helionforge.com</a>.
+      </p>
+
+      <div class="suite-plans">
+        <div class="suite-card">
+          <div class="suite-plan-name">Suite Starter</div>
+          <div class="suite-plan-price"><span>$</span>99</div>
+          <div class="suite-plan-period">/month · both apps</div>
+          <div class="suite-savings">Save $29/mo vs buying separate</div>
+          <ul class="suite-features">
+            <li>3 reporting clients</li>
+            <li>10 SOWs/month</li>
+            <li>Branded PDF output</li>
+            <li>Share links</li>
+            <li>Client accept / request changes</li>
+          </ul>
+          <button class="suite-btn suite-btn-secondary" onclick="subscribe('suite_starter')">Start Trial</button>
+        </div>
+
+        <div class="suite-card suite-featured">
+          <div class="suite-card-badge">Best Value</div>
+          <div class="suite-plan-name">Suite Growth</div>
+          <div class="suite-plan-price"><span>$</span>249</div>
+          <div class="suite-plan-period">/month · both apps</div>
+          <div class="suite-savings">Save $79/mo vs buying separate</div>
+          <ul class="suite-features">
+            <li>15 reporting clients</li>
+            <li>Unlimited SOWs</li>
+            <li>Custom templates</li>
+            <li>Priority support</li>
+            <li>Everything in Growth tiers</li>
+          </ul>
+          <button class="suite-btn suite-btn-primary" onclick="subscribe('suite_growth')">Start Trial</button>
+        </div>
+
+        <div class="suite-card">
+          <div class="suite-plan-name">Suite Agency</div>
+          <div class="suite-plan-price"><span>$</span>499</div>
+          <div class="suite-plan-period">/month · both apps</div>
+          <div class="suite-savings">Save $149/mo vs buying separate</div>
+          <ul class="suite-features">
+            <li>Unlimited clients</li>
+            <li>Unlimited SOWs</li>
+            <li>Team workspaces</li>
+            <li>Priority AI processing</li>
+            <li>White-label exports</li>
+            <li>Priority support</li>
+          </ul>
+          <button class="suite-btn suite-btn-secondary" onclick="subscribe('suite_agency')">Start Trial</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="pricing-footer">All plans include a 14-day free trial. No credit card required to start. Cancel anytime.</p>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    const token = localStorage.getItem('token');
+
+    function toast(msg, type = 'success') {
+      const el = document.createElement('div');
+      el.className = `toast-msg toast-${type}`;
+      el.textContent = msg;
+      document.getElementById('toast').appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    async function subscribe(planId) {
+      if (!token) {
+        window.location.href = '/register.html';
+        return;
+      }
+      try {
+        const res = await fetch('/api/billing/create-checkout-session', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: planId }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        window.location.href = data.url;
+      } catch(e) {
+        toast(e.message || 'Failed to start checkout', 'error');
+      }
+    }
+  </script>
+</body>
+</html>
