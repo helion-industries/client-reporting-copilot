@@ -4,27 +4,240 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Register · Client Reporting Copilot</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --bg: #0F0F0F;
+        --surface: #161616;
+        --surface-2: #1f1f1f;
+        --border: #2a2a2a;
+        --accent: #F97316;
+        --accent-dark: #C2410C;
+        --text: #FAFAF9;
+        --muted: #A8A29E;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Inter', sans-serif;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      .auth-wrap {
+        width: 100%;
+        max-width: 420px;
+      }
+
+      .brand {
+        text-align: center;
+        margin-bottom: 32px;
+      }
+
+      .brand-wordmark {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .brand-wordmark .bolt { font-size: 20px; line-height: 1; }
+
+      .brand-tagline {
+        font-family: 'Inter', sans-serif;
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 6px;
+        letter-spacing: 0.02em;
+      }
+
+      .brand-product {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+        margin-top: 10px;
+      }
+
+      .divider {
+        width: 40px;
+        height: 1px;
+        background: var(--border);
+        margin: 20px auto 0;
+      }
+
+      .auth-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 32px;
+      }
+
+      .auth-card h1 {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 6px;
+      }
+
+      .auth-copy {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 24px;
+        line-height: 1.5;
+      }
+
+      .auth-form label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+
+      .auth-form .field {
+        margin-bottom: 16px;
+      }
+
+      .auth-form input {
+        width: 100%;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 14px;
+        color: var(--text);
+        font-family: 'Inter', sans-serif;
+        transition: border-color 0.15s;
+        outline: none;
+      }
+
+      .auth-form input:focus {
+        border-color: var(--accent);
+      }
+
+      .auth-form input::placeholder { color: #444; }
+
+      .auth-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 20px;
+      }
+
+      .btn-primary {
+        flex: 1;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 11px 20px;
+        font-family: 'Inter', sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+
+      .btn-primary:hover { background: var(--accent-dark); }
+      .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+      .btn-secondary {
+        flex: 1;
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 11px 20px;
+        font-family: 'Inter', sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        text-align: center;
+        text-decoration: none;
+        transition: border-color 0.15s, color 0.15s;
+        display: inline-block;
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .auth-footer {
+        font-size: 12px;
+        color: var(--muted);
+        text-align: center;
+        margin-top: 20px;
+      }
+
+      .auth-footer a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .auth-footer a:hover { text-decoration: underline; }
+
+      .status-box {
+        font-size: 12px;
+        font-family: 'Inter', sans-serif;
+        color: #ef4444;
+        margin-top: 12px;
+        min-height: 16px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
   </head>
   <body>
-    <main class="shell shell-center">
-      <section class="auth-card card">
-        <div class="badge">New workspace</div>
+    <div class="auth-wrap">
+      <div class="brand">
+        <div class="brand-wordmark"><span class="bolt">⚡</span> HELION FORGE</div>
+        <div class="brand-tagline">Where intelligence builds.</div>
+        <div class="brand-product">Client Reporting Copilot</div>
+        <div class="divider"></div>
+      </div>
+
+      <div class="auth-card">
         <h1>Create your agency account</h1>
         <p class="auth-copy">Set up your reporting workspace, add clients, and generate polished monthly reports faster.</p>
+
         <form id="register-form" class="auth-form">
-          <label>Agency name <input type="text" name="agencyName" required /></label>
-          <label>Email <input type="email" name="email" required /></label>
-          <label>Password <input type="password" name="password" required /></label>
+          <div class="field">
+            <label for="agencyName">Agency name</label>
+            <input type="text" id="agencyName" name="agencyName" required placeholder="Acme Digital" />
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required placeholder="you@agency.com" />
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required placeholder="Min 8 characters" />
+          </div>
           <div class="auth-actions">
-            <button type="submit">Create account</button>
-            <a class="button-link button-link-secondary" href="/login.html">Already have an account</a>
+            <button type="submit" class="btn-primary">Create account</button>
+            <a class="btn-secondary" href="/login.html">Already have an account</a>
           </div>
         </form>
+
         <p class="auth-footer">Already set up? <a href="/login.html">Log in here</a>.</p>
         <pre id="status" class="status-box"></pre>
-      </section>
-    </main>
+      </div>
+    </div>
+
     <script>
       const form = document.getElementById('register-form');
       const status = document.getElementById('status');

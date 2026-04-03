@@ -588,6 +588,7 @@ function createApp(options = {}) {
         line_items: [{ price: plan.stripe_price_id, quantity: 1 }],
         customer_email: agency.email,
         metadata: { agency_id: String(req.auth.sub), plan_id: plan.id },
+        subscription_data: { trial_period_days: 14 },
         success_url: `${appBaseUrl}/dashboard.html?checkout=success`,
         cancel_url: `${appBaseUrl}/dashboard.html?checkout=cancelled`,
       });

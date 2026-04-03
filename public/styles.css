@@ -356,6 +356,8 @@ p {
   gap: 0.5rem;
 }
 
+.trial-note { font-size: 0.75rem; color: #64748b; text-align: center; margin-top: 0.5rem; }
+
 .checkout-banner {
   padding: 0.75rem 1.25rem;
   font-weight: 600;

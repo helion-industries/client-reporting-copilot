@@ -600,26 +600,34 @@
           const clientCount = subscription.client_count;
           const limit = plan.client_limit;
           const limitText = limit === null ? 'Unlimited clients' : `${clientCount}/${limit} clients used`;
-          const isFreePlan = plan.id === 'free';
-          const isPaidPlan = !isFreePlan && subscription.status === 'active';
+          const isFreePlan = plan.id === 'free' || !subscription.stripe_subscription_id;
+          const isTrialing = subscription.status === 'trialing';
+          const isPaidPlan = !isFreePlan || isTrialing;
 
-          let html = `
-            <div class="billing-plan">
-              <strong>${escapeHtml(plan.name)} Plan</strong>
-              <span class="muted billing-status"> · ${escapeHtml(subscription.status)}</span>
-            </div>
-            <p class="muted billing-limit">${limitText}</p>
-          `;
+          let html = '';
 
-          if (isFreePlan) {
-            html += `
-              <div class="billing-actions">
-                <button type="button" class="button-link" id="upgrade-starter-btn">Upgrade to Starter ($49/mo)</button>
-                <button type="button" class="button-link" id="upgrade-growth-btn">Upgrade to Growth ($149/mo)</button>
-                <button type="button" class="button-link button-link-secondary" id="upgrade-agency-btn">Upgrade to Agency ($349/mo)</button>
+          if (isFreePlan && !isTrialing) {
+            html = `
+              <div style="background:linear-gradient(135deg,#1a1a1a,#1a130a);border:1px solid rgba(249,115,22,0.4);border-radius:10px;padding:20px;margin-bottom:4px">
+                <p style="font-size:13px;font-weight:700;color:#F97316;text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px">No active plan</p>
+                <p style="font-size:14px;color:#94a3b8;margin:0 0 16px">Start your 14-day free trial — no charge until the trial ends.</p>
+                <button type="button" class="btn-primary" id="upgrade-starter-btn" style="width:auto;padding:10px 20px;margin-bottom:8px">Start Free Trial — Starter ($49/mo)</button>
+                <p class="trial-note" style="margin:0 0 12px">14-day free trial · Card required · Cancel anytime</p>
+                <button type="button" class="button-link" id="upgrade-growth-btn">Go straight to Growth ($149/mo)</button>
+                <button type="button" class="button-link button-link-secondary" id="upgrade-agency-btn">Agency plan ($349/mo)</button>
               </div>
             `;
-          } else if (isPaidPlan) {
+          } else {
+            html = `
+              <div class="billing-plan">
+                <strong>${escapeHtml(plan.name)} Plan</strong>
+                <span class="muted billing-status"> · ${escapeHtml(isTrialing ? 'trial' : subscription.status)}</span>
+              </div>
+              <p class="muted billing-limit">${limitText}</p>
+            `;
+          }
+
+          if (isPaidPlan) {
             html += `<button type="button" class="button-secondary" id="manage-billing-btn">Manage Billing</button>`;
             if (subscription.current_period_end) {
               const d = new Date(subscription.current_period_end).toLocaleDateString();
@@ -655,7 +663,7 @@
             });
           }
 
-          makeUpgradeHandler(upgradeStarterBtn, 'starter', 'Upgrade to Starter ($49/mo)');
+          makeUpgradeHandler(upgradeStarterBtn, 'starter', 'Start Free Trial — Starter ($49/mo)');
           makeUpgradeHandler(upgradeGrowthBtn, 'growth', 'Upgrade to Growth ($149/mo)');
           makeUpgradeHandler(upgradeAgencyBtn, 'agency', 'Upgrade to Agency ($349/mo)');
 
