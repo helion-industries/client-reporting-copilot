@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/styles.css" />
   <style>
     /* ── Pricing page overrides ── */
-    body { background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); }
+    body { background: linear-gradient(180deg, #0F0F0F 0%, #1a1a1a 100%); }
 
     .pricing-nav {
       display: flex;
@@ -20,7 +20,7 @@
     .pricing-nav-brand {
       font-size: 18px;
       font-weight: 800;
-      color: #2563eb;
+      color: #F97316;
       text-decoration: none;
     }
     .pricing-nav-links { display: flex; gap: 8px; }
@@ -34,9 +34,9 @@
       font-weight: 900;
       letter-spacing: -0.03em;
       margin: 0 0 12px;
-      color: #111827;
+      color: #f0f0f0;
     }
-    .pricing-hero p { color: #6b7280; font-size: 18px; max-width: 500px; margin: 0 auto; }
+    .pricing-hero p { color: #888; font-size: 18px; max-width: 500px; margin: 0 auto; }
 
     .pricing-wrap {
       max-width: 1180px;
@@ -53,22 +53,22 @@
     }
 
     .plan-card {
-      background: #fff;
-      border: 1px solid #dbe3ee;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
       border-radius: 16px;
       padding: 28px 24px;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 4px 20px rgba(15,23,42,0.06);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
     .plan-card.featured {
-      border-color: #2563eb;
-      box-shadow: 0 0 0 2px #2563eb, 0 8px 30px rgba(37,99,235,0.15);
+      border-color: #F97316;
+      box-shadow: 0 0 0 2px #F97316, 0 8px 30px rgba(249,115,22,0.15);
     }
     .plan-badge {
       display: inline-block;
-      background: #dbeafe;
-      color: #1d4ed8;
+      background: rgba(249,115,22,0.15);
+      color: #F97316;
       font-size: 11px;
       font-weight: 800;
       letter-spacing: 0.06em;
@@ -78,14 +78,14 @@
       margin-bottom: 14px;
       align-self: flex-start;
     }
-    .plan-name { font-size: 20px; font-weight: 800; color: #111827; margin-bottom: 6px; }
-    .plan-price { font-size: 42px; font-weight: 900; color: #111827; line-height: 1; }
+    .plan-name { font-size: 20px; font-weight: 800; color: #f0f0f0; margin-bottom: 6px; }
+    .plan-price { font-size: 42px; font-weight: 900; color: #F97316; line-height: 1; }
     .plan-price span { font-size: 20px; font-weight: 600; vertical-align: top; line-height: 1.6; }
-    .plan-period { color: #6b7280; font-size: 14px; margin: 4px 0 20px; }
+    .plan-period { color: #888; font-size: 14px; margin: 4px 0 20px; }
     .plan-features { list-style: none; padding: 0; margin: 0 0 24px; flex: 1; }
-    .plan-features li { padding: 7px 0; color: #374151; font-size: 14px; border-bottom: 1px solid #f3f4f6; }
+    .plan-features li { padding: 7px 0; color: #d1d5db; font-size: 14px; border-bottom: 1px solid #2a2a2a; }
     .plan-features li:last-child { border-bottom: none; }
-    .plan-features li::before { content: "✓ "; color: #059669; font-weight: 700; }
+    .plan-features li::before { content: "✓ "; color: #F97316; font-weight: 700; }
 
     .plan-btn {
       display: block;
@@ -100,10 +100,10 @@
       transition: 0.15s;
       text-decoration: none;
     }
-    .plan-btn-primary { background: #2563eb; color: #fff; }
-    .plan-btn-primary:hover { background: #1d4ed8; }
-    .plan-btn-secondary { background: #f1f5f9; color: #374151; border: 1px solid #dbe3ee; }
-    .plan-btn-secondary:hover { background: #e2e8f0; }
+    .plan-btn-primary { background: #F97316; color: #fff; }
+    .plan-btn-primary:hover { background: #ea6d10; }
+    .plan-btn-secondary { background: #222; color: #f0f0f0; border: 1px solid #333; }
+    .plan-btn-secondary:hover { background: #2a2a2a; }
 
     /* ── Agency Suite banner ── */
     .suite-section {
@@ -213,7 +213,21 @@
     .suite-btn-secondary { background: #222; color: #f0f0f0; border: 1px solid #333; }
     .suite-btn-secondary:hover { background: #2a2a2a; }
 
-    .pricing-footer { text-align: center; color: #9ca3af; font-size: 13px; margin-top: 32px; }
+    .pricing-footer { text-align: center; color: #666; font-size: 13px; margin-top: 32px; }
+
+    /* Override global button-link styles for dark pricing page */
+    .pricing-nav .button-link {
+      background: #F97316;
+      color: #fff;
+      border-color: transparent;
+    }
+    .pricing-nav .button-link:hover { background: #ea6d10; }
+    .pricing-nav .button-link-secondary {
+      background: #222;
+      color: #f0f0f0;
+      border-color: #444;
+    }
+    .pricing-nav .button-link-secondary:hover { background: #2a2a2a; }
 
     #toast {
       position: fixed; bottom: 24px; right: 24px; z-index: 9999;
@@ -236,7 +250,7 @@
 </head>
 <body>
   <nav class="pricing-nav">
-    <a href="/" class="pricing-nav-brand">📊 Client Reporting Copilot</a>
+    <a href="/" class="pricing-nav-brand">⚡ HELION FORGE</a>
     <div class="pricing-nav-links">
       <a href="/login.html" class="button-link button-link-secondary" style="min-height:38px;padding:0.5rem 1rem;font-size:14px;">Log in</a>
       <a href="/register.html" class="button-link" style="min-height:38px;padding:0.5rem 1rem;font-size:14px;">Get Started</a>
