@@ -19,4 +19,4 @@ jobs:
             git pull origin main
             npm install --production --silent
             sudo systemctl restart client-reporting.service
-            echo "Deployed at $(date)"
+            echo "Deployed client-reporting-copilot at $(date)"
